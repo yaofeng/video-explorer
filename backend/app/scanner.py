@@ -97,6 +97,7 @@ class Scanner:
                             "group": self._group_name(str(video_path), l2_path),
                             "ready": meta is not None,
                             "meta": meta,
+                            "seq": -1,  # 缓存项，不参与增量更新
                         }
                 else:
                     # 生成
@@ -126,8 +127,9 @@ class Scanner:
                         }
 
                     with state.lock:
-                        state.videos[vid] = item
                         state.seq += 1
+                        item["seq"] = state.seq
+                        state.videos[vid] = item
 
         finally:
             with state.lock:
@@ -166,15 +168,17 @@ class Scanner:
         with state.lock:
             updates = []
             for vid, item in state.videos.items():
-                if item["ready"] and item["meta"] is not None:
+                if item["ready"] and item["meta"] is not None and item.get("seq", -1) > since:
                     updates.append({
-                        "seq": state.seq,
+                        "seq": item["seq"],
                         "video_id": vid,
                         "file_name": item["file_name"],
                         "file_size": item["file_size"],
                         "group": item["group"],
                         "meta": item["meta"],
                     })
+            # 按 seq 排序，保证前端按顺序处理
+            updates.sort(key=lambda u: u["seq"])
             return {
                 "scanning": state.scanning,
                 "total": state.total,

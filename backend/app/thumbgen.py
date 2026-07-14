@@ -1,7 +1,7 @@
 import io
 import subprocess
 from PIL import Image
-from .probe import probe_video
+from .probe import probe_video, resolution_label
 
 TARGET_SMALL_W = 480
 SEEK_TIME = 210.0  # 3:30
@@ -56,9 +56,13 @@ def _extract_frame(path: str, probe: dict) -> Image.Image | None:
     return Image.open(io.BytesIO(out.stdout))
 
 
-def generate_thumbnails(path: str):
+def generate_thumbnails(path: str) -> tuple[dict, bytes, bytes]:
     """生成小图和高清图，都返回 bytes。失败时返回占位图。"""
-    probe = probe_video(path)
+    try:
+        probe = probe_video(path)
+    except Exception:
+        # probe 失败时返回空元数据+占位图
+        probe = {"codec": "UNKNOWN", "duration": 0.0, "width": 0, "height": 0, "cover_stream_index": None}
     img = _extract_frame(path, probe)
 
     # 小图
@@ -69,7 +73,7 @@ def generate_thumbnails(path: str):
 
     # 高清图
     if img is not None:
-        target_w = min(probe["width"], img.size[0])
+        target_w = probe["width"] if probe["width"] > 0 and probe["width"] < img.size[0] else img.size[0]
         full_bytes = fit_to_16_9(img, target_w)
     else:
         full_w = probe["width"] if probe["width"] > 0 else 1920
@@ -80,6 +84,6 @@ def generate_thumbnails(path: str):
         "duration": probe["duration"],
         "width": probe["width"],
         "height": probe["height"],
-        "resolution_label": None,  # 调用者填充
+        "resolution_label": resolution_label(probe["height"]),
     }
     return meta, small_bytes, full_bytes

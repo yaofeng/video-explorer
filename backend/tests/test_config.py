@@ -1,7 +1,22 @@
 import pytest
-from pathlib import Path
 from app.config import AppConfig, load_config, save_config, data_path, ip_whitelist
 import os
+
+
+def test_ip_whitelist_parses_comma_separated(monkeypatch):
+    monkeypatch.setenv("IP_WHITE_LIST", "192.168.1.1,10.0.0.1")
+    assert ip_whitelist() == ["192.168.1.1", "10.0.0.1"]
+
+
+def test_ip_whitelist_empty(monkeypatch):
+    monkeypatch.setenv("IP_WHITE_LIST", "")
+    assert ip_whitelist() == []
+
+
+def test_ip_whitelist_trims_spaces(monkeypatch):
+    monkeypatch.setenv("IP_WHITE_LIST", " 192.168.1.1 10.0.0.1 ")
+    assert ip_whitelist() == ["192.168.1.1", "10.0.0.1"]
+
 
 def test_defaults(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_PATH", str(tmp_path))

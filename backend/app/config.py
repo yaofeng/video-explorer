@@ -1,7 +1,14 @@
 import os
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 import yaml
+
+
+logger = logging.getLogger(__name__)
+
+
+__all__ = ("AppConfig", "load_config", "save_config", "data_path", "config_file", "ip_whitelist")
 
 
 @dataclass
@@ -36,8 +43,8 @@ def load_config() -> AppConfig:
         try:
             with open(f, "r", encoding="utf-8") as fh:
                 loaded = yaml.safe_load(fh) or {}
-        except (yaml.YAMLError, OSError):
-            pass
+        except (yaml.YAMLError, OSError) as exc:
+            logger.warning("Failed to load config from %s: %s", f, exc)
     return AppConfig(
         video_path_list=list(loaded.get("video_path_list", []) or []),
         page_size=int(loaded.get("page_size", 0) or 0),

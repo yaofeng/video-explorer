@@ -3,7 +3,10 @@ import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 import yaml
+from dotenv import load_dotenv
 
+# 从项目根目录加载 .env 文件
+load_dotenv(dotenv_path=Path(__file__).parent.parent / ".env")
 
 logger = logging.getLogger(__name__)
 

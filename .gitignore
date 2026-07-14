@@ -5,15 +5,19 @@ __pycache__/
 .pytest_cache/
 .venv/
 backend/.venv/
+backend/app/static/
 
 # Node
 node_modules/
 frontend/dist/
 
 # 数据
-.cache/
+.env
+data/
+cache/
 logs/
 *.pid
+*.log
 
 # IDE
 .vscode/

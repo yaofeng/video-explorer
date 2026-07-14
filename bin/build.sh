@@ -1,7 +1,6 @@
 #!/bin/bash
-set -e
 
-# 构建前端（使用 bun）
+# 构建前端
 cd frontend
 export PATH="$HOME/.bun/bin:$PATH"
 bun run build

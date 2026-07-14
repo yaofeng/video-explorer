@@ -11,6 +11,8 @@ def probe_video(path: str) -> dict:
         out = subprocess.run(cmd, capture_output=True, text=True, timeout=60, check=True)
     except subprocess.CalledProcessError as e:
         raise RuntimeError(f"ffprobe failed: {e.stderr}")
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(f"ffprobe timed out for: {path}")
 
     data = json.loads(out.stdout)
     streams = data.get("streams", [])

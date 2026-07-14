@@ -1,0 +1,19 @@
+version: '3.8'
+services:
+  video-explorer:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - ${DATA_PATH:-./data}:/app/data
+      - /path/to/your/videos:/videos:ro
+    environment:
+      - DATA_PATH=/app/data
+      - IP_WHITE_LIST=${IP_WHITE_LIST:-}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3

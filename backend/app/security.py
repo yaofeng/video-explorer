@@ -9,6 +9,6 @@ class IPWhitelistMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
         whitelist = set(config.ip_whitelist())
         client_ip = request.client.host if request.client else ""
-        if not whitelist or client_ip in LOCALHOST or client_ip in whitelist:
+        if client_ip in LOCALHOST or client_ip in whitelist:
             return await call_next(request)
         return JSONResponse({"detail": "forbidden: ip not allowed"}, status_code=403)

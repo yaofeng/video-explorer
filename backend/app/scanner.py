@@ -170,6 +170,7 @@ class Scanner:
                         "height": probe_result["height"],
                         "duration": probe_result["duration"],
                         "resolution_str": probe_result["resolution_str"],
+                        "file_size": probe_result["file_size"],
                         "resolution_label": resolution_label(probe_result["height"]),
                     }
                 except Exception:

@@ -214,6 +214,8 @@ videos:
 | GET | `/api/thumb/{video_id}` | 原始 JPEG 缩略图（浮层用，200 / 202 未就绪）|
 | GET | `/api/thumb/{video_id}?size=small` | 压缩小图 JPEG（卡片用，480px 宽，懒生成并缓存）|
 | GET | `/api/scan-status?l2_id=&since=` | 处理进度 + 新就绪项列表 |
+| POST | `/api/roots/{root_id}/build` | 为整个视频库构建索引（扫描所有 L2 子目录），后台执行 |
+| GET | `/api/tasks` | 当前运行中的索引任务进度（供前端浮窗显示）|
 
 **导航数据流**：
 `/api/roots` → 选视频库根目录 → `/api/roots/{root}/l1`（顶部菜单）→ `/api/l1/{l1}/l2`（左侧菜单）→ `/api/l2/{l2}/videos`（中心区）。
@@ -306,8 +308,20 @@ videos:
 - 表单字段：`video_path_list`（动态增删的目录路径数组）、`page_size`、`column_size`
 - 提交 → `PUT /api/config` → 后端写回 `$DATA_PATH/config.yaml`
 - 路径校验：目录必须存在且可读；重复路径去重
+- **每个视频目录后有"构建索引"图标按钮**（锤子图标，无文字），点击后 `POST /api/roots/{root_id}/build`，后台扫描该视频库所有 L2 子目录生成索引
 
-### 7.6 前后端联调（开发模式）
+### 7.6 任务进度浮窗
+
+页面右上角浮窗显示索引任务进度，覆盖两种触发场景：
+- **手动构建**：设置页点击"构建索引"按钮
+- **自动扫描**：打开目录时自动触发的扫描
+
+**实现**：
+- Pinia store `useTaskStore` 轮询 `GET /api/tasks`（有任务时每 1.5s 轮询，无任务时停止）
+- 任务分两类：`build`（构建整库，total/done = L2 目录数）和 `scan`（单目录扫描，total/done = 视频数）
+- `TaskToast.vue` 组件全局挂载（App.vue），右上角显示进度条；任务完成（从列表消失）后保持 2 秒"满格绿"再隐藏
+
+### 7.7 前后端联调（开发模式）
 
 - `vite.config.ts` 配置 dev server 代理：`/api` → `http://localhost:8000`
 - `start-dev.sh` 同时启动 `vite` 与 `uvicorn`，前端从 Vite dev server 取页面、API 走代理

@@ -3,6 +3,7 @@ from pathlib import Path
 from .. import config
 from ..models import DirEntry
 from ..path_id import path_id
+from ..routes.videos import scanner
 
 router = APIRouter()
 
@@ -76,3 +77,24 @@ def list_l2(l1_id: str):
                 path=str(item),
             ))
     return entries
+
+
+@router.post("/roots/{root_id}/build")
+def build_index(root_id: str):
+    """为整个视频库根目录构建索引（所有 L2 子目录）。后台执行，立即返回。"""
+    cfg = config.load_config()
+    root_path = None
+    for p in cfg.video_path_list:
+        rp = Path(p).resolve()
+        if path_id(str(rp)) == root_id:
+            root_path = str(rp)
+            break
+    if root_path is None:
+        raise HTTPException(404, "root not found")
+    return scanner.build_index(root_path)
+
+
+@router.get("/tasks")
+def list_tasks():
+    """返回所有运行中的索引任务进度（供前端浮窗显示）。"""
+    return scanner.get_tasks()

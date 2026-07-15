@@ -67,6 +67,11 @@ export const useBrowserStore = defineStore('browser', {
       this.groups = data.groups
       this.scanning = data.scanning
       this.progress = data.progress || { total: 0, level1: 0, level2: 0, level3: 0 }
+      // 打开目录触发扫描 → 启动任务浮窗轮询
+      if (this.scanning) {
+        const { useTaskStore } = await import('./task')
+        useTaskStore().notifyScan()
+      }
     },
     async pollStatus() {
       if (!this.selectedL2Id) return

@@ -26,7 +26,7 @@ def _build_cache_entry(video_path: Path, item: dict, level: int,
         "group": item.get("group"),
         "level": level,
         "create_time": int(stat.st_ctime),
-        "modify_time": stat.st_mtime,
+        "modify_time": int(stat.st_mtime),
         "file_size": int(stat.st_size / (1024 * 1024)),  # MB 整数
     }
     if meta:
@@ -87,11 +87,25 @@ class _L2State:
         self.last_used = 0.0  # LRU 时间戳
 
 
+class _Task:
+    """后台索引任务的进度跟踪。"""
+    def __init__(self, task_id: str, kind: str, label: str):
+        self.id = task_id
+        self.kind = kind  # "scan" | "build"
+        self.label = label
+        self.total = 0
+        self.done = 0
+        self.running = True
+        self.lock = threading.Lock()
+
+
 class Scanner:
     def __init__(self):
         self._l2_states = OrderedDict()  # LRU 有序：最近使用的在末尾
         self._id_to_path = {}
         self._lock = threading.Lock()  # 保护 _l2_states 和 _id_to_path
+        self._tasks = {}  # task_id -> _Task
+        self._tasks_lock = threading.Lock()
 
     def _get_l2_state(self, l2_path: str) -> _L2State:
         with self._lock:
@@ -152,6 +166,11 @@ class Scanner:
 
             with state.lock:
                 state.total = len(video_paths)
+
+            # 注册扫描任务（供前端浮窗显示进度）
+            scan_task_id = f"scan:{path_id.path_id(l2_path)}"
+            self._register_task(scan_task_id, "scan", f"扫描: {Path(l2_path).name}")
+            self._update_task(scan_task_id, total=len(video_paths))
 
             # 批量注册 id_to_path（一次加锁，减少竞争）
             id_path_map = {}
@@ -269,6 +288,8 @@ class Scanner:
                         state.videos[vid]["meta"] = meta
                         state.videos[vid]["level"] = 2
                         state.videos[vid]["_probe"] = probe_result
+                        processed = sum(1 for v in state.videos.values() if v.get("level", 1) >= 2)
+                self._update_task(scan_task_id, done=processed)
 
                 # 持久化元数据（磁盘 I/O，在锁外）
                 if root and meta:
@@ -334,6 +355,7 @@ class Scanner:
                 # 清理残留的临时 _probe 字段
                 for entry in state.videos.values():
                     entry.pop("_probe", None)
+            self._remove_task(scan_task_id)
 
     def _group_name(self, video_path: str, l2_path: str) -> str:
         v = Path(video_path).resolve()
@@ -454,3 +476,91 @@ class Scanner:
                 small_path.write_bytes(small_bytes)
             return ("image/jpeg", small_path.read_bytes())
         return ("image/jpeg", full_path.read_bytes())
+
+    # ------------------------------------------------------------------
+    # 任务进度跟踪（供前端浮窗显示）
+    # ------------------------------------------------------------------
+    def _register_task(self, task_id: str, kind: str, label: str) -> _Task:
+        with self._tasks_lock:
+            task = _Task(task_id, kind, label)
+            self._tasks[task_id] = task
+            return task
+
+    def _get_task(self, task_id: str) -> _Task | None:
+        with self._tasks_lock:
+            return self._tasks.get(task_id)
+
+    def _update_task(self, task_id: str, **kwargs):
+        with self._tasks_lock:
+            task = self._tasks.get(task_id)
+        if task:
+            with task.lock:
+                for k, v in kwargs.items():
+                    setattr(task, k, v)
+
+    def _remove_task(self, task_id: str):
+        with self._tasks_lock:
+            self._tasks.pop(task_id, None)
+
+    def get_tasks(self) -> list[dict]:
+        """返回所有运行中的任务进度。"""
+        with self._tasks_lock:
+            tasks = list(self._tasks.values())
+        result = []
+        for t in tasks:
+            with t.lock:
+                if not t.running:
+                    continue
+                result.append({
+                    "id": t.id,
+                    "kind": t.kind,
+                    "label": t.label,
+                    "total": t.total,
+                    "done": t.done,
+                })
+        return result
+
+    def build_index(self, root_path: str) -> dict:
+        """为整个视频库根目录构建索引（所有 L2 目录）。后台执行，立即返回状态。"""
+        task_id = f"build:{path_id.path_id(root_path)}"
+        existing = self._get_task(task_id)
+        if existing:
+            with existing.lock:
+                if existing.running:
+                    return {"running": True, "total": existing.total, "done": existing.done}
+
+        self._register_task(task_id, "build", f"构建索引: {Path(root_path).name}")
+        t = threading.Thread(target=self._build_worker, args=(root_path, task_id), daemon=True)
+        t.start()
+        return {"running": True, "total": 0, "done": 0}
+
+    def _build_worker(self, root_path: str, task_id: str):
+        try:
+            root = Path(root_path)
+            l2_dirs = []
+            for l1 in sorted(root.iterdir()):
+                if not l1.is_dir():
+                    continue
+                for l2 in sorted(l1.iterdir()):
+                    if l2.is_dir():
+                        l2_dirs.append(str(l2))
+            self._update_task(task_id, total=len(l2_dirs))
+
+            for idx, l2 in enumerate(l2_dirs):
+                # 触发该 L2 目录扫描（若已在扫描则跳过等待）
+                self.ensure_scan(l2)
+                # 等待该目录扫描完成
+                state = self._get_l2_state(l2)
+                while True:
+                    with state.lock:
+                        scanning = state.scanning
+                    if not scanning:
+                        break
+                    time.sleep(0.3)
+                self._update_task(task_id, done=idx + 1)
+        finally:
+            task = self._get_task(task_id)
+            if task:
+                with task.lock:
+                    task.running = False
+            self._remove_task(task_id)

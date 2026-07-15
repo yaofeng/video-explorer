@@ -32,27 +32,47 @@
 
       <div class="flex-1"></div>
 
-      <!-- 主题选择 -->
-      <select
-        v-model="themeMode"
-        @change="onThemeChange"
-        class="px-3 h-9 bg-slate-100 dark:bg-slate-800 rounded-lg text-sm text-slate-600 dark:text-slate-300 border border-transparent hover:border-slate-300 dark:hover:border-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 transition cursor-pointer"
-      >
-        <option value="system">跟随系统</option>
-        <option value="light">浅色</option>
-        <option value="dark">深色</option>
-      </select>
+      <!-- 主题切换图标组 -->
+      <div class="flex items-center gap-0.5 p-0.5 bg-slate-100 dark:bg-slate-800 rounded-lg">
+        <button
+          v-for="opt in themeOptions"
+          :key="opt.value"
+          @click="setTheme(opt.value)"
+          :title="opt.label"
+          :class="[
+            'w-8 h-8 flex items-center justify-center rounded-md transition-all duration-200',
+            themeMode === opt.value
+              ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-sm'
+              : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
+          ]"
+        >
+          <!-- 电脑（跟随系统） -->
+          <svg v-if="opt.value === 'system'" xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2" y="3" width="20" height="14" rx="2"/>
+            <path d="M8 21h8M12 17v4"/>
+          </svg>
+          <!-- 太阳（浅色） -->
+          <svg v-else-if="opt.value === 'light'" xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="4"/>
+            <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>
+          </svg>
+          <!-- 月亮（深色） -->
+          <svg v-else xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+          </svg>
+        </button>
+      </div>
 
-      <!-- 设置按钮 -->
+      <!-- 设置按钮（仅图标） -->
       <button
         @click="$emit('openSettings')"
-        class="h-9 px-3.5 rounded-lg text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition flex items-center gap-1.5"
+        title="设置"
+        class="w-9 h-9 flex items-center justify-center rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
       >
         <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="12" cy="12" r="3"/>
           <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
         </svg>
-        设置
       </button>
     </div>
   </div>
@@ -61,6 +81,8 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useThemeStore } from '../stores/theme'
+
+type ThemeMode = 'light' | 'dark' | 'system'
 
 const props = defineProps<{
   roots: { id: string; name: string }[]
@@ -75,16 +97,23 @@ const emit = defineEmits<{
 }>()
 
 const theme = useThemeStore()
-const themeMode = ref(theme.mode)
+const themeMode = ref<ThemeMode>(theme.mode)
 const selectedRootId = ref(props.selectedRoot || '')
+
+const themeOptions: { value: ThemeMode; label: string }[] = [
+  { value: 'system', label: '跟随系统' },
+  { value: 'light', label: '浅色' },
+  { value: 'dark', label: '深色' },
+]
+
+function setTheme(mode: ThemeMode) {
+  themeMode.value = mode
+  theme.setMode(mode)
+}
 
 function onRootChange() {
   if (selectedRootId.value) {
     emit('selectRoot', selectedRootId.value)
   }
-}
-
-function onThemeChange() {
-  theme.setMode(themeMode.value as 'light' | 'dark' | 'system')
 }
 </script>

@@ -7,6 +7,8 @@ export function useScanPolling() {
 
   const start = () => {
     if (interval) return
+    // 立即轮询一次，避免等待第一个 2s 周期才更新缩略图
+    browser.pollStatus()
     interval = setInterval(async () => {
       if (browser.scanning) {
         await browser.pollStatus()

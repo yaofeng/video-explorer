@@ -48,25 +48,22 @@ function videoMatches(v: any): boolean {
     const q = filter.search.toLowerCase()
     if (!v.file_name.toLowerCase().includes(q)) return false
   }
-  // 编码过滤（仅在 meta 就绪时生效）
+  // 编码过滤：没有 meta 信息的视频（level 1）不过滤（仍然显示）
+  // 有 meta 的才参与编码过滤
   if (filter.codecs.length > 0 && v.meta?.codec) {
     const c = v.meta.codec
-    if (filter.codecs.includes('OTHER')) {
-      const isKnown = KNOWN_CODECS.includes(c)
-      const isOtherSelected = filter.codecs.includes('OTHER')
-      const knownSelected = filter.codecs.filter(k => KNOWN_CODECS.includes(k))
-      if (isOtherSelected && knownSelected.length === 0) {
-        // 只选了"其他"
-        if (isKnown) return false
-      } else if (isOtherSelected && knownSelected.length > 0) {
-        // 选了"其他"+ 部分已知编码
-        if (!isKnown && !knownSelected.includes(c)) return false
-      } else {
-        // 只选了已知编码
-        if (!knownSelected.includes(c)) return false
-      }
-    } else if (!filter.codecs.includes(c)) {
-      return false
+    const hasOther = filter.codecs.includes('OTHER')
+    const knownSelected = filter.codecs.filter(k => KNOWN_CODECS.includes(k))
+
+    if (hasOther && knownSelected.length === 0) {
+      // 只选了"其他" → 只显示非已知编码的视频
+      if (KNOWN_CODECS.includes(c)) return false
+    } else if (hasOther && knownSelected.length > 0) {
+      // 选了"其他"+ 已知编码 → 显示已知编码 + 非已知编码
+      if (!KNOWN_CODECS.includes(c) && !knownSelected.includes(c)) return false
+    } else if (knownSelected.length > 0) {
+      // 只选了已知编码
+      if (!knownSelected.includes(c)) return false
     }
   }
   return true

@@ -190,7 +190,7 @@ const themeOptions: { value: ThemeMode; label: string }[] = [
 ]
 const sortOptions: { field: SortField; label: string; icon: string }[] = [
   { field: 'file_name', label: '文件名', icon: '<path d="M3 7v10M7 5v14M11 4v16M15 9v6M19 2v20"/><polyline points="21 15 15 21"/><polyline points="3 21 9 15"/>' },
-  { field: 'file_size', label: '文件大小', icon: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>' },
+  { field: 'file_size', label: '文件大小', icon: '<rect x="4" y="14" width="4" height="7"/><rect x="10" y="10" width="4" height="11"/><rect x="16" y="6" width="4" height="15"/><rect x="22" y="2" width="4" height="19"/>' },
   { field: 'modify_time', label: '修改时间', icon: '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>' },
 ]
 const codecOptions = [

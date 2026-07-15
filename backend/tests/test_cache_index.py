@@ -35,7 +35,7 @@ def test_video_cache_path(monkeypatch, tmp_path):
     video = "/media/videos/movies/dune.mkv"
     index_path, thumb_path = video_cache_path(root, video)
     expected_index = tmp_path / "cache" / "videos-abcd" / "movies" / "index.yaml"
-    expected_thumb = tmp_path / "cache" / "videos-abcd" / "movies" / "dune.mkv.png"
+    expected_thumb = tmp_path / "cache" / "videos-abcd" / "movies" / "dune.jpg"
     assert index_path == expected_index, f"Expected {expected_index}, got {index_path}"
     assert thumb_path == expected_thumb, f"Expected {expected_thumb}, got {thumb_path}"
     assert index_path.parent.exists(), "Parent directory should have been created"
@@ -49,7 +49,7 @@ def test_video_cache_path_root_level_video(monkeypatch, tmp_path):
     video = "/media/videos/dune.mkv"
     index_path, thumb_path = video_cache_path(root, video)
     expected_index = tmp_path / "cache" / "videos-abcd" / "index.yaml"
-    expected_thumb = tmp_path / "cache" / "videos-abcd" / "dune.mkv.png"
+    expected_thumb = tmp_path / "cache" / "videos-abcd" / "dune.jpg"
     assert index_path == expected_index
     assert thumb_path == expected_thumb
 
@@ -196,9 +196,9 @@ def test_resolution_from_width_height_fields(monkeypatch, tmp_path):
 
 def test_get_thumb_path_found(tmp_path):
     index_path = tmp_path / "index.yaml"
-    thumb = tmp_path / "movie.mkv.png"
+    thumb = tmp_path / "movie.jpg"
     thumb.write_text("dummy")
-    video = {"file_name": "movie.mkv", "thumb_file": "movie.mkv.png"}
+    video = {"file_name": "movie.mkv", "thumb_file": "movie.jpg"}
     save_index(index_path, [video])
     result = get_thumb_path(index_path, "movie.mkv")
     assert result == thumb
@@ -206,7 +206,7 @@ def test_get_thumb_path_found(tmp_path):
 
 def test_get_thumb_path_file_missing(tmp_path):
     index_path = tmp_path / "index.yaml"
-    video = {"file_name": "movie.mkv", "thumb_file": "movie.mkv.png"}
+    video = {"file_name": "movie.mkv", "thumb_file": "movie.jpg"}
     save_index(index_path, [video])
     # thumb file doesn't exist on disk
     result = get_thumb_path(index_path, "movie.mkv")
@@ -238,7 +238,7 @@ def test_save_index_preserves_field_order(tmp_path):
         "codec": "HEVC",
         "create_time": 1720900000,
         "modify_time": 1720900000.0,
-        "thumb_file": "dune.mkv.png",
+        "thumb_file": "dune.jpg",
     }
     save_index(index_path, [video])
     with open(index_path) as f:
@@ -248,7 +248,7 @@ def test_save_index_preserves_field_order(tmp_path):
     idx = key_lines.index("file_name: dune.mkv")
     file_size_idx = key_lines.index("file_size_gb: 8.0")
     codec_idx = key_lines.index("codec: HEVC")
-    thumb_idx = key_lines.index("thumb_file: dune.mkv.png")
+    thumb_idx = key_lines.index("thumb_file: dune.jpg")
     assert file_size_idx > idx, "file_size_gb should come after file_name"
     assert codec_idx > file_size_idx, "codec should come after file_size_gb"
     assert thumb_idx > codec_idx, "thumb_file should come after codec"

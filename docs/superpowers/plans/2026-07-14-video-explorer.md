@@ -4,7 +4,7 @@
 
 **目标：** 构建一个视频库浏览器，使用 Python 后端（FastAPI）和 Vue3 前端，支持分层目录导航、渐进式缩略图生成和设置管理。
 
-**架构：** FastAPI 提供 API 端点和静态前端服务。Vue3 SPA 使用 Tailwind CSS 构建 UI。后台工作队列处理渐进式数据获取（L1：目录遍历→L2：ffprobe→L3：缩略图）。每目录 `index.yaml` 缓存视频基础信息，`.png` 缩略图分离存储不做服务端处理。IP 白名单中间件保护访问安全。
+**架构：** FastAPI 提供 API 端点和静态前端服务。Vue3 SPA 使用 Tailwind CSS 构建 UI。后台工作队列处理渐进式数据获取（L1：目录遍历→L2：ffprobe→L3：缩略图）。每目录 `index.yaml` 缓存视频基础信息，`.jpg` 缩略图分离存储不做服务端尺寸/比例处理。IP 白名单中间件保护访问安全。
 
 **技术栈：**
 - 后端：Python 3.12、FastAPI、uvicorn、PyYAML、Pillow（使用 uv 管理环境）
@@ -32,12 +32,12 @@
 - 左侧菜单显示处理进度条（已完成/总数）
 
 **注意：** 以下任务基于最新设计文档的 6 项澄清和修改重新编写。与之前版本的关键差异：
-- `descfile.py` 替换为 `cache_index.py`（index.yaml + .png 缩略图，无二进制描述文件）
+- `descfile.py` 替换为 `cache_index.py`（index.yaml + .jpg 缩略图，无二进制描述文件）
 - `thumbgen.py` 只做原始帧提取，不做尺寸/比例处理
 - API 路由增加 `roots/{id}/l1` + `l1/{id}/l2` 层级
 - 前端使用三层渐进加载（L1文件名→L2元数据→L3缩略图）
 - 左侧菜单显示处理进度条
-- **缩略图双尺寸**：`?size=small` 返回压缩 JPEG（卡片用），默认返回原始 PNG（浮层用），响应带 `Cache-Control` 头
+- **缩略图双尺寸**：`?size=small` 返回压缩 JPEG（卡片用），默认返回原始 JPEG（浮层用），响应带 `Cache-Control` 头
 - **缓存读取**：扫描时先读 index.yaml 缓存，已完整缓存的视频直接标记 level 3，跳过重新抽帧（秒开）
 - **"未分组"组不显示组标题**，仅展示卡片
 
@@ -148,7 +148,7 @@ git commit -m "chore: initialize project structure and dependencies"
 ## 第二阶段：后端核心模块（TDD）
 
 > **设计变更：** 以下是按最新设计文档重新描述的后端模块。关键差异：
-> - 删除 `descfile.py`（二进制描述文件），新增 `cache_index.py`（index.yaml + .png 缩略图管理）
+> - 删除 `descfile.py`（二进制描述文件），新增 `cache_index.py`（index.yaml + .jpg 缩略图管理）
 > - `thumbgen.py` 只做原始帧提取（ffmpeg），不做任何服务端图片处理
 > - `probe.py` 返回原始分辨率字段，`resolution_label` 改由前端计算
 
@@ -840,9 +840,9 @@ git commit -m "feat(thumbgen): add dual thumbnail generation with fallback to pl
 
 ## 第三阶段：后端扫描器与 API（TDD）
 
-> **设计变更：** cache 改为 `index.yaml` + `.png` 缩略图方案：
+> **设计变更：** cache 改为 `index.yaml` + `.jpg` 缩略图方案：
 > - 每目录一个 `index.yaml`（文件名、大小GB、原始分辨率、编码、创建/修改时间、缩略图文件名）
-> - 缩略图为原始帧 `.png`，不做服务端尺寸/比例适配
+> - 缩略图为原始帧 `.jpg`，不做服务端尺寸/比例适配
 > - `scanner.py` 改为操作 `cache_index.py` 读写 index.yaml
 > - API 导航层级：roots（视频库根目录）→ l1（一级目录/顶部菜单）→ l2（二级目录/左侧菜单）
 
@@ -1518,7 +1518,7 @@ git commit -m "test(api): add end-to-end API tests"
 > - L2（异步）：ffprobe 元数据就绪后更新编码/分辨率/时长/大小标签
 > - L3（异步）：缩略图就绪后将 `<p>` 替换为 `<img>`（使用 `object-fit: contain` 做显示适配）
 > - 左侧二级菜单项在后台处理进行时显示进度条（已完成/总数）
-> - 缩略图为原始分辨率 PNG，服务端不做任何处理
+> - 缩略图为原始分辨率 JPEG，服务端不做尺寸/比例处理
 > - 视频库根目录切换下拉框在顶部菜单最左侧
 
 ### 任务 13：初始化 Vue3 项目

@@ -108,7 +108,7 @@ $DATA_PATH/cache/
 │   │   ├── index.yaml                 # 该目录下所有视频的基础信息
 │   │   ├── sci-fi/
 │   │   │   ├── index.yaml             # 叶子目录基础信息
-│   │   │   ├── dune.mkv.png           # 缩略图
+│   │   │   ├── dune.jpg              # 缩略图（原始分辨率 JPEG）
 │   │   │   └── ...
 │   │   └── action/
 │   │       ├── index.yaml
@@ -129,21 +129,21 @@ videos:
     codec: "HEVC"                    # H264 / HEVC / ...
     create_time: 1720900000          # 创建时间，epoch 秒
     modify_time: 1720900000.0        # 修改时间，epoch 秒
-    thumb_file: "dune.mkv.png"       # 缩略图文件名
+    thumb_file: "dune.jpg"          # 缩略图文件名
   - file_name: "blade-runner.mkv"
     file_size_gb: 6.4
     resolution: "1920x1080"
     codec: "H264"
     create_time: 1720900100
     modify_time: 1720900100.0
-    thumb_file: "blade-runner.mkv.png"
+    thumb_file: "blade-runner.jpg"
 ```
 
 扫描时先快速填充 `index.yaml`（仅文件系统探知大小/时间），再异步逐个提取缩略图并更新 `index.yaml` 中的 `thumb_file` 字段。
 
 ### 5.3 缩略图存储
 
-- 每个视频对应一个同名的 `.png` 缩略图文件
+- 每个视频对应一个同名 `.jpg` 缩略图文件（视频文件名去掉原始扩展名 + `.jpg`）
 - 缩略图为从视频中提取的**原始帧**，不做尺寸/比例处理（处理在前端显示时完成）
 - 提取来源：优先使用视频内嵌封面；无封面则抽 `00:03:30` 附近的帧（短于 3:30 取中点）；失败则跳过
 
@@ -193,7 +193,7 @@ videos:
 | GET | `/api/roots/{root_id}/l1` | 根目录下的一级目录（顶部菜单）|
 | GET | `/api/l1/{l1_id}/l2` | 一级目录下的二级目录（左侧菜单）|
 | GET | `/api/l2/{l2_id}/videos` | 二级目录下所有视频文件名（分组）+ 触发后台处理 |
-| GET | `/api/thumb/{video_id}` | 原始 PNG 缩略图（浮层用，200 / 202 未就绪）|
+| GET | `/api/thumb/{video_id}` | 原始 JPEG 缩略图（浮层用，200 / 202 未就绪）|
 | GET | `/api/thumb/{video_id}?size=small` | 压缩小图 JPEG（卡片用，480px 宽，懒生成并缓存）|
 | GET | `/api/scan-status?l2_id=&since=` | 处理进度 + 新就绪项列表 |
 
@@ -202,11 +202,11 @@ videos:
 
 所有 id 均可反查到绝对路径并校验是否落在 video_path_list 内，越权返回 403。
 
-缩略图响应带 `Cache-Control: public, max-age=86400` 头，浏览器缓存复用。`size=small` 首次请求时从原始 PNG 生成 480px 宽 JPEG 并缓存为 `.small.jpg`，后续直接读缓存。
+缩略图响应带 `Cache-Control: public, max-age=86400` 头，浏览器缓存复用。`size=small` 首次请求时从原始 JPEG 生成 480px 宽小图并缓存为 `.small.jpg`，后续直接读缓存。
 
 ### 6.4 缓存与并发
 
-- `index.yaml` + 缩略图 `.png` 文件为磁盘缓存，进程重启不丢失
+- `index.yaml` + 缩略图 `.jpg` 文件为磁盘缓存，进程重启不丢失
 - 后台处理任务用单 worker 队列 + 文件锁防重复
 - 缩略图请求与生成解耦：未就绪返回 202
 
@@ -251,9 +251,9 @@ videos:
 3. **L3（异步）**：缩略图就绪后，将 `<p>加载中...</p>` 替换为 `<img>` 显示图片
 
 **缩略图显示规则**：
-- 缩略图由后端提取**原始帧**（源文件分辨率、不做任何处理），以 `.png` 格式存储
-- 卡片显示请求 `?size=small`，后端懒生成 480px 宽 JPEG（约 20-30KB）并缓存，避免传输原始大图
-- 浮层显示请求原始 PNG（完整分辨率）
+- 缩略图由后端提取**原始帧**（源文件分辨率、不缩放不裁剪），以 `.jpg`（JPEG）格式存储
+- 卡片显示请求 `?size=small`，后端懒生成 480px 宽小 JPEG（约 20-30KB）并缓存
+- 浮层显示请求原始 JPEG（完整分辨率）
 - 前端 `<img>` 使用 CSS `object-fit: contain` 配合 16:9 容器做显示适配——不拉伸、不裁剪
 - 缩略图响应带 `Cache-Control` 头，浏览器缓存复用，切换目录不重复下载
 - 缩略图未就绪时用 `<p class="text-gray-500">加载中...</p>` 占位，尺寸与卡片缩略图区域一致

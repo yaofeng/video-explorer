@@ -401,7 +401,7 @@ class Scanner:
         """返回缩略图字节。
 
         small=True 返回压缩后的小 JPEG（卡片用，懒生成并缓存为 .small.jpg）；
-        small=False 返回原始 PNG（浮层用）。
+        small=False 返回原始 JPEG（浮层用）。
         """
         with self._lock:
             video_path = self._id_to_path.get(video_id)
@@ -412,14 +412,14 @@ class Scanner:
         if root is None:
             return None
         index_path, _ = cache_index.video_cache_path(str(root), video_path)
-        png_path = cache_index.get_thumb_path(index_path, Path(video_path).name)
-        if png_path is None:
+        full_path = cache_index.get_thumb_path(index_path, Path(video_path).name)
+        if full_path is None:
             return None
         if small:
-            small_path = png_path.with_suffix(".small.jpg")
-            if not small_path.exists() or small_path.stat().st_mtime < png_path.stat().st_mtime:
-                # 懒生成小图（或源 PNG 更新后重建）
-                small_bytes = thumbgen.make_small_jpeg(png_path.read_bytes())
+            # 小图：{stem}.small.jpg，与 full 同目录
+            small_path = full_path.with_suffix(".small.jpg")
+            if not small_path.exists() or small_path.stat().st_mtime < full_path.stat().st_mtime:
+                small_bytes = thumbgen.make_small_jpeg(full_path.read_bytes())
                 small_path.write_bytes(small_bytes)
             return ("image/jpeg", small_path.read_bytes())
-        return ("image/png", png_path.read_bytes())
+        return ("image/jpeg", full_path.read_bytes())

@@ -4,19 +4,20 @@ from app.probe import probe_video
 from app.thumbgen import extract_frame, extract_frame_from_probe
 
 
-def test_extract_frame_returns_png(sample_video):
-    """Verify extract_frame_from_probe returns valid PNG bytes."""
+def test_extract_frame_returns_jpeg(sample_video):
+    """Verify extract_frame_from_probe returns valid JPEG bytes."""
     probe = probe_video(sample_video)
     result = extract_frame_from_probe(sample_video, probe)
     assert result is not None
-    assert result[:8] == b"\x89PNG\r\n\x1a\n"  # PNG magic bytes
+    # JPEG magic bytes: FF D8 FF
+    assert result[:3] == b"\xff\xd8\xff"
 
 
-def test_extract_frame_from_probe_returns_png(sample_video):
-    """Verify extract_frame (which probes internally) returns valid PNG bytes."""
+def test_extract_frame_returns_jpeg_internal_probe(sample_video):
+    """Verify extract_frame (which probes internally) returns valid JPEG bytes."""
     result = extract_frame(sample_video)
     assert result is not None
-    assert result[:8] == b"\x89PNG\r\n\x1a\n"
+    assert result[:3] == b"\xff\xd8\xff"
 
 
 def test_extract_frame_returns_none_for_nonexistent():
@@ -39,4 +40,4 @@ def test_extract_frame_from_probe_seek_short_video(sample_video):
     probe = probe_video(sample_video)
     result = extract_frame_from_probe(sample_video, probe)
     assert result is not None
-    assert len(result) > 100  # PNG should be more than a few bytes
+    assert len(result) > 100  # JPEG should be more than a few bytes

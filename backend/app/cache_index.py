@@ -28,7 +28,8 @@ def video_cache_path(root_path: str, video_abs_path: str) -> tuple[Path, Path]:
     parent_dir = root_cache_dir(root_path) / rel.parent
     parent_dir.mkdir(parents=True, exist_ok=True)
     index_path = parent_dir / "index.yaml"
-    thumb_path = parent_dir / f"{video.name}.png"
+    # 缩略图以视频文件名（去掉原始扩展名）命名，JPEG 格式
+    thumb_path = parent_dir / f"{video.stem}.jpg"
     return index_path, thumb_path
 
 

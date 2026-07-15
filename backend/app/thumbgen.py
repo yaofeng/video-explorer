@@ -1,7 +1,7 @@
 """Raw frame extraction from video files using ffmpeg.
 
-Returns raw PNG bytes with no server-side image processing
-(resizing, aspect-ratio adjustment, or letterboxing).
+Extracts a single frame at original resolution with no resizing or
+aspect-ratio adjustment. Output format is JPEG.
 """
 
 import io
@@ -19,7 +19,7 @@ SMALL_JPEG_QUALITY = 85
 
 
 def _extract_frame(path: str, probe: dict) -> bytes | None:
-    """Run ffmpeg to extract a single frame, returning raw PNG bytes.
+    """Run ffmpeg to extract a single frame, returning raw JPEG bytes.
 
     Prioritises embedded cover streams, then SEEK_TIME seek,
     then video midpoint for short clips.
@@ -31,7 +31,7 @@ def _extract_frame(path: str, probe: dict) -> bytes | None:
             "-i", str(path),
             "-map", f"0:{idx}",
             "-frames:v", "1",
-            "-f", "image2pipe", "-vcodec", "png", "-",
+            "-f", "image2pipe", "-vcodec", "mjpeg", "-",
         ]
     else:
         dur = probe.get("duration", 0.0)
@@ -41,7 +41,7 @@ def _extract_frame(path: str, probe: dict) -> bytes | None:
             "-ss", f"{t:.2f}",
             "-i", str(path),
             "-frames:v", "1",
-            "-f", "image2pipe", "-vcodec", "png", "-",
+            "-f", "image2pipe", "-vcodec", "mjpeg", "-",
         ]
 
     try:
@@ -55,7 +55,7 @@ def _extract_frame(path: str, probe: dict) -> bytes | None:
 
 
 def extract_frame(path: str) -> bytes | None:
-    """Extract a single raw PNG frame from *path*.
+    """Extract a single raw JPEG frame from *path*.
 
     Probes the video internally to determine cover-stream vs seek strategy.
     Returns ``None`` when ffprobe or ffmpeg fails.
@@ -68,7 +68,7 @@ def extract_frame(path: str) -> bytes | None:
 
 
 def extract_frame_from_probe(path: str, probe: dict) -> bytes | None:
-    """Extract a single raw PNG frame using pre-computed *probe* data.
+    """Extract a single raw JPEG frame using pre-computed *probe* data.
 
     *probe* must contain ``cover_stream_index`` (int | None) and
     ``duration`` (float).  Returns ``None`` when ffmpeg fails.
@@ -76,12 +76,12 @@ def extract_frame_from_probe(path: str, probe: dict) -> bytes | None:
     return _extract_frame(path, probe)
 
 
-def make_small_jpeg(png_bytes: bytes, target_width: int = SMALL_WIDTH) -> bytes:
-    """将原始 PNG 帧等比缩小为 JPEG（卡片预览用）。
+def make_small_jpeg(jpeg_bytes: bytes, target_width: int = SMALL_WIDTH) -> bytes:
+    """将原始 JPEG 帧等比缩小为更小的 JPEG（卡片预览用）。
 
-    仅缩放尺寸 + JPEG 压缩，不改变宽高比、不加黑边。
+    仅缩放尺寸 + 重新压缩，不改变宽高比、不加黑边。
     """
-    img = Image.open(io.BytesIO(png_bytes))
+    img = Image.open(io.BytesIO(jpeg_bytes))
     if img.width > target_width:
         ratio = target_width / img.width
         new_size = (target_width, max(1, round(img.height * ratio)))

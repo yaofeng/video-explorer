@@ -7,6 +7,7 @@
       :selectedL1="browser.selectedL1Id"
       @selectRoot="onSelectRoot"
       @selectL1="onSelectL1"
+      @openSettings="settingsOpen = true"
     />
     <div class="flex flex-1 overflow-hidden">
       <SideMenu
@@ -19,6 +20,7 @@
       <VideoGrid :groups="browser.groups" :columnSize="config.column_size" @showLightbox="showLightbox" />
     </div>
     <LightboxModal :video="lightboxVideo" @close="lightboxVideo = null" />
+    <SettingsModal :open="settingsOpen" @close="settingsOpen = false" />
   </div>
 </template>
 
@@ -31,10 +33,12 @@ import TopMenu from '../components/TopMenu.vue'
 import SideMenu from '../components/SideMenu.vue'
 import VideoGrid from '../components/VideoGrid.vue'
 import LightboxModal from '../components/LightboxModal.vue'
+import SettingsModal from '../components/SettingsModal.vue'
 
 const browser = useBrowserStore()
 const config = useConfigStore()
 const lightboxVideo = ref(null)
+const settingsOpen = ref(false)
 useScanPolling()
 
 onMounted(async () => {

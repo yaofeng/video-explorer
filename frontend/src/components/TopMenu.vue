@@ -35,12 +35,12 @@
       <option value="light">浅色</option>
       <option value="dark">深色</option>
     </select>
-    <router-link
-      to="/settings"
+    <button
+      @click="$emit('openSettings')"
       class="px-4 py-2 bg-gray-200 dark:bg-gray-700 rounded hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200"
     >
       设置
-    </router-link>
+    </button>
   </div>
 </template>
 
@@ -57,6 +57,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'selectRoot', id: string): void
   (e: 'selectL1', id: string): void
+  (e: 'openSettings'): void
 }>()
 
 const theme = useThemeStore()

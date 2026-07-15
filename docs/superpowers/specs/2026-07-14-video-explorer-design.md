@@ -302,11 +302,12 @@ videos:
 - 监听系统主题变化（`matchMedia`），在 `system` 模式下自动响应
 - 所有组件使用 Tailwind 的 `dark:` 前缀定义深色样式
 
-### 7.5 设置页面
+### 7.5 设置浮窗
 
-- 路由 `/settings`，顶部菜单右侧"设置"按钮进入
-- 表单字段：`video_path_list`（动态增删的目录路径数组）、`page_size`、`column_size`
-- 提交 → `PUT /api/config` → 后端写回 `$DATA_PATH/config.yaml`
+- 设置以**浮窗（Modal）**形式展示，不再是独立路由页面
+- 顶部菜单右侧"设置"按钮触发浮窗打开；点击遮罩或"取消"/"×"关闭
+- 浮窗内容：`video_path_list`（动态增删的目录路径数组）、`page_size`、`column_size`
+- 保存 → `PUT /api/config` → 后端写回 `$DATA_PATH/config.yaml` → 关闭浮窗
 - 路径校验：目录必须存在且可读；重复路径去重
 - **每个视频目录后有"构建索引"图标按钮**（锤子图标，无文字），点击后 `POST /api/roots/{root_id}/build`，后台扫描该视频库所有 L2 子目录生成索引
 

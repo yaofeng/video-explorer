@@ -189,7 +189,7 @@ class Scanner:
                 for video_path in video_paths:
                     vid = path_id.path_id(str(video_path))
                     try:
-                        source_mtime = video_path.stat().st_mtime
+                        source_mtime = int(video_path.stat().st_mtime)
                     except OSError:
                         continue
                     index_path, thumb_path = cache_index.video_cache_path(
@@ -202,8 +202,8 @@ class Scanner:
                     )
                     if not cached:
                         continue
-                    # 缓存有效性：modify_time 记录源文件上次扫描时的 mtime
-                    if cached.get("modify_time", 0) < source_mtime:
+                    # 缓存有效性：modify_time（整数秒）记录源文件上次扫描时的 mtime
+                    if int(cached.get("modify_time", 0)) < source_mtime:
                         continue  # 源文件已更新，缓存过期
                     if cached.get("level", 1) >= 3 and cached.get("thumb_file") and thumb_path.exists():
                         meta = _meta_from_cache(cached)

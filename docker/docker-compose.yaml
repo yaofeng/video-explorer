@@ -1,5 +1,6 @@
 services:
   video-explorer:
+    image: yaofeng928/video-explorer:latest
     build:
       context: ..
       dockerfile: docker/Dockerfile

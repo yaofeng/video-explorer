@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 
 def probe_video(path: str) -> dict:
@@ -37,6 +38,7 @@ def probe_video(path: str) -> dict:
     height = int(vstream.get("height") or 0)
     codec = (vstream.get("codec_name") or "unknown").upper()
     duration = float(data.get("format", {}).get("duration") or vstream.get("duration") or 0.0)
+    file_size_bytes = os.path.getsize(path)
 
     return {
         "codec": codec,
@@ -44,6 +46,8 @@ def probe_video(path: str) -> dict:
         "height": height,
         "duration": duration,
         "cover_stream_index": cover_index,
+        "resolution_str": f"{width}x{height}",
+        "file_size": file_size_bytes,
     }
 
 def resolution_label(height: int) -> str:

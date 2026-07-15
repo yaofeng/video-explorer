@@ -9,6 +9,9 @@ def test_probe_video(sample_video):
     assert result["width"] == 320
     assert result["height"] == 240
     assert result["duration"] >= 1.5
+    assert result["resolution_str"] == "320x240"
+    assert isinstance(result["file_size"], int)
+    assert result["file_size"] > 0
 
 def test_resolution_label():
     assert resolution_label(2160) == "4K"

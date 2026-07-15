@@ -243,11 +243,12 @@ def test_save_index_preserves_field_order(tmp_path):
     save_index(index_path, [video])
     with open(index_path) as f:
         lines = [l.strip() for l in f if l.strip()]
-    # The fields should appear in order under the first video entry
-    idx = lines.index("file_name: dune.mkv") if "file_name: dune.mkv" in lines else -1
-    assert idx >= 0, "file_name should be present"
-    # Check a later field comes after
-    file_size_idx = lines.index("file_size_gb: 8.0") if "file_size_gb: 8.0" in lines else -1
-    codec_idx = lines.index("codec: HEVC") if "codec: HEVC" in lines else -1
+    # The first field is prefixed with "- " in YAML block sequence; strip it
+    key_lines = [l.lstrip("- ") for l in lines]
+    idx = key_lines.index("file_name: dune.mkv")
+    file_size_idx = key_lines.index("file_size_gb: 8.0")
+    codec_idx = key_lines.index("codec: HEVC")
+    thumb_idx = key_lines.index("thumb_file: dune.mkv.png")
     assert file_size_idx > idx, "file_size_gb should come after file_name"
     assert codec_idx > file_size_idx, "codec should come after file_size_gb"
+    assert thumb_idx > codec_idx, "thumb_file should come after codec"

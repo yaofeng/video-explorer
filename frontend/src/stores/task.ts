@@ -18,7 +18,7 @@ export const useTaskStore = defineStore('task', {
   state: () => ({
     running: [] as Task[],
     completed: [] as CompletedEntry[],  // 刚完成，2秒内仍显示
-    timer: null as ReturnType<typeof setTimeout> | null,
+    active: false,  // 是否正在轮询
   }),
   getters: {
     visible(state): Task[] {
@@ -49,22 +49,26 @@ export const useTaskStore = defineStore('task', {
       }
     },
     startPolling() {
-      if (this.timer) return
+      if (this.active) return
+      this.active = true
       const tick = async () => {
         await this.poll()
+        // 有运行中或刚完成的任务 → 继续；否则停止
         if (this.running.length > 0 || this.completed.length > 0) {
-          this.timer = setTimeout(tick, 1500)
+          setTimeout(tick, 1000)
         } else {
-          this.timer = null
+          this.active = false
         }
       }
       tick()
     },
     async buildIndex(rootId: string) {
+      // 立即先轮询一次（抢占式），再发请求，确保不漏掉快速任务
+      this.startPolling()
       await axios.post(`/api/roots/${rootId}/build`)
+      await this.poll()  // 请求返回后立刻再拉一次
       this.startPolling()
     },
-    // 打开目录触发的扫描也启动轮询
     notifyScan() {
       this.startPolling()
     },

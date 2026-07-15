@@ -70,19 +70,18 @@
           ]"
         >
           <svg v-html="s.icon" class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"/>
-          <!-- 方向指示 -->
           <span v-if="filter.sortField === s.field" class="text-[9px] ml-0.5">{{ filter.sortDir === 'asc' ? '↑' : '↓' }}</span>
         </button>
       </div>
 
       <!-- 编码过滤 -->
-      <div class="relative">
+      <div class="relative" ref="codecRef">
         <button
-          @click="codecOpen = !codecOpen"
+          @click.stop="codecOpen = !codecOpen"
           title="编码过滤"
           :class="[
             'w-9 h-9 flex items-center justify-center rounded-lg transition',
-            filter.codecs.length
+            !filter.allCodecsSelected
               ? 'bg-indigo-100 dark:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400'
               : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
           ]"
@@ -91,36 +90,6 @@
             <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>
           </svg>
         </button>
-        <!-- 下拉菜单 -->
-        <div
-          v-if="codecOpen"
-          class="absolute right-0 top-full mt-1 w-40 bg-white dark:bg-slate-900 rounded-xl shadow-2xl ring-1 ring-slate-200 dark:ring-slate-800 p-2 z-50"
-        >
-          <div
-            v-for="c in codecOptions"
-            :key="c.value"
-            @click="onCodecToggle(c.value)"
-            class="flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition"
-          >
-            <div
-              :class="[
-                'w-4 h-4 rounded border-2 flex items-center justify-center transition',
-                filter.codecs.includes(c.value)
-                  ? 'bg-indigo-600 border-indigo-600'
-                  : 'border-slate-300 dark:border-slate-600'
-              ]"
-            >
-              <svg v-if="filter.codecs.includes(c.value)" xmlns="http://www.w3.org/2000/svg" class="w-3 h-3 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
-            </div>
-            <span class="text-slate-700 dark:text-slate-200">{{ c.label }}</span>
-          </div>
-          <div v-if="filter.codecs.length" class="border-t border-slate-200 dark:border-slate-700 mt-1 pt-1">
-            <button
-              @click="filter.clearCodecs()"
-              class="w-full text-left px-3 py-2 rounded-lg text-sm text-slate-500 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
-            >清除筛选</button>
-          </div>
-        </div>
       </div>
 
       <!-- 主题切换图标组 -->
@@ -151,18 +120,52 @@
       >
         <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="12" cy="12" r="3"/>
-          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
         </svg>
       </button>
     </div>
   </div>
 
-  <!-- 遮罩点击关闭 codec 下拉 -->
-  <div v-if="codecOpen" class="fixed inset-0 z-40" @click="codecOpen = false"></div>
+  <!-- codec 下拉菜单（用 Teleport 渲染到 body，避免 z-index 层级问题） -->
+  <Teleport to="body">
+    <div v-if="codecOpen" class="fixed inset-0 z-40" @click="codecOpen = false"></div>
+    <div
+      v-if="codecOpen"
+      class="fixed z-50 w-44 bg-white dark:bg-slate-900 rounded-xl shadow-2xl ring-1 ring-slate-200 dark:ring-slate-800 p-2"
+      :style="codecMenuStyle"
+    >
+      <div class="flex justify-between items-center px-3 py-1.5 border-b border-slate-200 dark:border-slate-700 mb-1">
+        <span class="text-xs font-medium text-slate-500 dark:text-slate-400">编码筛选</span>
+        <button
+          v-if="!filter.allCodecsSelected"
+          @click="filter.selectAll()"
+          class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline"
+        >全选</button>
+      </div>
+      <div
+        v-for="c in codecOptions"
+        :key="c.value"
+        @click="filter.toggleCodec(c.value)"
+        class="flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+      >
+        <div
+          :class="[
+            'w-4 h-4 rounded border-2 flex items-center justify-center transition',
+            filter.isCodecChecked(c.value)
+              ? 'bg-indigo-600 border-indigo-600'
+              : 'border-slate-300 dark:border-slate-600'
+          ]"
+        >
+          <svg v-if="filter.isCodecChecked(c.value)" xmlns="http://www.w3.org/2000/svg" class="w-3 h-3 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+        </div>
+        <span class="text-slate-700 dark:text-slate-200">{{ c.label }}</span>
+      </div>
+    </div>
+  </Teleport>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useThemeStore } from '../stores/theme'
 import { useFilterStore } from '../stores/filter'
 
@@ -203,6 +206,16 @@ const codecOptions = [
 const themeMode = ref<ThemeMode>(theme.mode)
 const selectedRootId = ref(props.selectedRoot || '')
 const codecOpen = ref(false)
+const codecRef = ref<HTMLElement | null>(null)
+
+const codecMenuStyle = computed(() => {
+  if (!codecRef.value) return { display: 'none' }
+  const rect = codecRef.value.getBoundingClientRect()
+  return {
+    top: `${rect.bottom + 4}px`,
+    right: `${window.innerWidth - rect.right}px`,
+  }
+})
 
 function setTheme(mode: ThemeMode) {
   themeMode.value = mode
@@ -215,17 +228,15 @@ function onRootChange() {
   }
 }
 
-function onCodecToggle(val: string) {
-  if (val === 'OTHER') {
-    const known = ['H264', 'HEVC', 'AV1']
-    const hasOther = filter.codecs.includes('OTHER')
-    if (hasOther) {
-      filter.setCodecs(filter.codecs.filter(c => c !== 'OTHER'))
-    } else {
-      filter.setCodecs([...filter.codecs.filter(c => known.includes(c)), 'OTHER'])
-    }
-    return
-  }
-  filter.toggleCodec(val)
+/* 全局 ESC 键关闭下拉 */
+function onKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape') codecOpen.value = false
 }
+onMounted(() => document.addEventListener('keydown', onKeydown))
+onUnmounted(() => document.removeEventListener('keydown', onKeydown))
 </script>
+
+<style scoped>
+/* 确保 Teleport 后的下拉菜单在 body 层级正确渲染 */
+:deep(.v-overlay) { z-index: 50; }
+</style>

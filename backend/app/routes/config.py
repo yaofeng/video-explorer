@@ -12,6 +12,7 @@ def get_config():
         video_path_list=cfg.video_path_list,
         page_size=cfg.page_size,
         column_size=cfg.column_size,
+        parse_rules=cfg.parse_rules,
     )
 
 
@@ -21,6 +22,12 @@ def update_config(model: ConfigModel):
         video_path_list=model.video_path_list,
         page_size=model.page_size,
         column_size=model.column_size,
+        parse_rules=model.parse_rules,
     )
     config.save_config(cfg)
-    return model
+    return ConfigModel(
+        video_path_list=cfg.video_path_list,
+        page_size=cfg.page_size,
+        column_size=cfg.column_size,
+        parse_rules=cfg.parse_rules,
+    )

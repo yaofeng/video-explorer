@@ -3,7 +3,7 @@
     <div v-if="filteredGroups.length === 0" class="text-center mt-16 text-slate-400 dark:text-slate-500">
       <p class="text-lg">没有匹配的视频</p>
       <button
-        v-if="filter.search || filter.codecs.length"
+        v-if="filter.search || !filter.allCodecsSelected"
         @click="clearFilters"
         class="mt-2 text-sm text-indigo-600 dark:text-indigo-400 hover:underline"
       >清除筛选条件</button>
@@ -48,23 +48,26 @@ function videoMatches(v: any): boolean {
     const q = filter.search.toLowerCase()
     if (!v.file_name.toLowerCase().includes(q)) return false
   }
-  // 编码过滤：没有 meta 信息的视频（level 1）不过滤（仍然显示）
-  // 有 meta 的才参与编码过滤
-  if (filter.codecs.length > 0 && v.meta?.codec) {
+  // 编码过滤（排除模式）：excludedCodecs 记录被取消勾选的编码
+  // 全选状态（排除列表为空）= 不过滤
+  if (filter.excludedCodecs.length > 0 && v.meta?.codec) {
     const c = v.meta.codec
-    const hasOther = filter.codecs.includes('OTHER')
-    const knownSelected = filter.codecs.filter(k => KNOWN_CODECS.includes(k))
+    const excludedOther = filter.excludedCodecs.includes('OTHER')
+    const excludedKnown = filter.excludedCodecs.filter(k => KNOWN_CODECS.includes(k))
 
-    if (hasOther && knownSelected.length === 0) {
-      // 只选了"其他" → 只显示非已知编码的视频
-      if (KNOWN_CODECS.includes(c)) return false
-    } else if (hasOther && knownSelected.length > 0) {
-      // 选了"其他"+ 已知编码 → 显示已知编码 + 非已知编码
-      if (!KNOWN_CODECS.includes(c) && !knownSelected.includes(c)) return false
-    } else if (knownSelected.length > 0) {
-      // 只选了已知编码
-      if (!knownSelected.includes(c)) return false
+    if (excludedKnown.length === 0 && !excludedOther) return true  // 无排除
+
+    if (excludedOther && excludedKnown.length === 0) {
+      // 只排除了"其他"：已知编码显示，非已知编码隐藏
+      return KNOWN_CODECS.includes(c)
     }
+    if (excludedOther && excludedKnown.length > 0) {
+      // 排除了"其他"+部分已知：已知的只要不在排除列表就显示
+      if (KNOWN_CODECS.includes(c)) return !excludedKnown.includes(c)
+      return false  // 非已知编码被"其他"排除
+    }
+    // 只排除了部分已知编码
+    return !excludedKnown.includes(c)
   }
   return true
 }
@@ -94,6 +97,6 @@ const filteredGroups = computed(() => {
 
 function clearFilters() {
   filter.setSearch('')
-  filter.clearCodecs()
+  filter.selectAll()
 }
 </script>

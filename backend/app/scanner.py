@@ -12,13 +12,33 @@ VIDEO_EXTS = {".mp4", ".mkv", ".mov", ".avi", ".m4v", ".flv", ".webm", ".wmv", "
 MAX_CACHED_L2_DIRS = 20
 
 
+def _parse_filename(file_name: str, rules: list[dict]) -> dict | None:
+    """对文件名应用解析规则，匹配成功返回 ext 字典。
+
+    规则格式：{"name": "JAV", "pattern": "^(?P<code>[A-Z]+-?\\d+)..."}
+    匹配成功的 named groups 成为 ext 字段的 key-value。
+    """
+    import re
+    if not rules:
+        return None
+    for rule in rules:
+        pattern = rule.get("pattern", "")
+        if not pattern:
+            continue
+        try:
+            m = re.match(pattern, file_name)
+            if m:
+                ext = {k: v for k, v in m.groupdict().items() if v is not None}
+                if ext:
+                    return ext
+        except re.error:
+            continue
+    return None
+
+
 def _build_cache_entry(video_path: Path, item: dict, level: int,
                        thumb_file: str | None = None) -> dict:
-    """构建扁平化的 index.yaml 条目。
-
-    字段：file_name, group, level, create_time, modify_time, file_size(MB 整数),
-    codec, width, height, duration(秒 整数), resolution_label, thumb_file(可选)。
-    """
+    """构建扁平化的 index.yaml 条目。"""
     stat = video_path.stat()
     meta = item.get("meta") or {}
     entry = {
@@ -27,14 +47,17 @@ def _build_cache_entry(video_path: Path, item: dict, level: int,
         "level": level,
         "create_time": int(stat.st_ctime),
         "modify_time": int(stat.st_mtime),
-        "file_size": int(stat.st_size / (1024 * 1024)),  # MB 整数
+        "file_size": int(stat.st_size / (1024 * 1024)),
     }
     if meta:
         entry["codec"] = meta.get("codec")
         entry["width"] = meta.get("width")
         entry["height"] = meta.get("height")
-        entry["duration"] = int(meta.get("duration", 0) or 0)  # 秒 整数
+        entry["duration"] = int(meta.get("duration", 0) or 0)
         entry["resolution_label"] = meta.get("resolution_label")
+    ext = item.get("ext")
+    if ext:
+        entry["ext"] = ext
     if thumb_file:
         entry["thumb_file"] = thumb_file
     return entry
@@ -216,6 +239,8 @@ class Scanner:
                             "level": 3,
                             "meta": meta,
                         }
+                        if "ext" in cached:
+                            item["ext"] = cached["ext"]
                         with state.lock:
                             state.seq += 1
                             item["seq"] = state.seq
@@ -244,6 +269,12 @@ class Scanner:
                     "level": 1,
                     "meta": None,
                 }
+
+                # 应用文件名解析规则
+                cfg = config.load_config()
+                ext_data = _parse_filename(video_path.name, cfg.parse_rules)
+                if ext_data:
+                    item["ext"] = ext_data
 
                 # 持久化最小条目到 index.yaml（磁盘 I/O，在锁外）
                 if root:

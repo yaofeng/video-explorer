@@ -4,22 +4,17 @@
     @click="$emit('showLightbox', video)"
   >
     <div class="relative aspect-video bg-slate-900 flex items-center justify-center">
-      <!-- L3: 缩略图 -->
       <img
         v-if="video.level >= 3"
         :src="`/api/thumb/${video.video_id}?size=small`"
         class="w-full h-full object-contain"
         loading="lazy"
       />
-      <!-- L1/L2: 加载占位 -->
       <p
         v-else
         class="text-slate-500 dark:text-slate-400 text-sm animate-pulse"
-      >
-        加载中...
-      </p>
+      >加载中...</p>
 
-      <!-- L2: 元数据胶囊标签（毛玻璃） -->
       <template v-if="video.level >= 2 && video.meta">
         <div class="absolute top-2 left-2 bg-black/55 backdrop-blur-sm text-white text-[11px] font-medium px-1.5 py-0.5 rounded-md">
           {{ video.meta.codec || '-' }}
@@ -31,22 +26,74 @@
           {{ formatDuration(video.meta.duration) }}
         </div>
       </template>
-      <!-- 文件大小（始终显示） -->
       <div class="absolute bottom-2 right-2 bg-black/55 backdrop-blur-sm text-white text-[11px] font-medium px-1.5 py-0.5 rounded-md tabular-nums">
         {{ formatSize(video.file_size) }}
       </div>
     </div>
-    <div class="px-3 py-2 text-sm text-slate-700 dark:text-slate-300 line-clamp-2 leading-snug">{{ video.file_name }}</div>
+
+    <!-- 文件名 / 解析信息 -->
+    <div class="px-3 py-2">
+      <template v-if="video.ext && video.ext.title">
+        <div class="text-sm text-slate-700 dark:text-slate-200 leading-snug line-clamp-1 mb-1" :title="video.ext.title">{{ video.ext.title }}</div>
+        <div class="flex flex-wrap gap-1">
+          <span
+            v-for="(val, key) in extLabels"
+            :key="key"
+            @click.stop="copyText(val)"
+            :title="'点击复制 ' + val"
+            class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-indigo-100 dark:hover:bg-indigo-500/20 hover:text-indigo-700 dark:hover:text-indigo-300 cursor-pointer transition"
+          >
+            <span>{{ key }}:</span>
+            <span>{{ val }}</span>
+            <svg class="w-3 h-3 shrink-0 opacity-60" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+            </svg>
+          </span>
+        </div>
+      </template>
+      <template v-else>
+        <div class="text-sm text-slate-700 dark:text-slate-300 line-clamp-2 leading-snug">{{ video.file_name }}</div>
+      </template>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-defineProps<{
+import { computed } from 'vue'
+
+const props = defineProps<{
   video: any
 }>()
 defineEmits<{
   (e: 'showLightbox', video: any): void
 }>()
+
+/** ext 中要显示的标签键，按优先级排序 */
+const LABEL_KEYS = ['code', 'actress']
+
+const extLabels = computed(() => {
+  if (!props.video.ext) return {}
+  const result: Record<string, string> = {}
+  for (const key of LABEL_KEYS) {
+    const val = props.video.ext[key]
+    if (val) result[key] = val
+  }
+  return result
+})
+
+function copyText(text: string) {
+  navigator.clipboard.writeText(text).catch(() => {
+    // 降级：选中复制
+    const ta = document.createElement('textarea')
+    ta.value = text
+    ta.style.position = 'fixed'
+    ta.style.opacity = '0'
+    document.body.appendChild(ta)
+    ta.select()
+    document.execCommand('copy')
+    document.body.removeChild(ta)
+  })
+}
 
 function formatResolution(height: number): string {
   if (height >= 2160) return '4K'

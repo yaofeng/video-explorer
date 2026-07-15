@@ -19,6 +19,7 @@ class AppConfig:
     video_path_list: list = field(default_factory=list)
     page_size: int = 0
     column_size: int = 4
+    parse_rules: list = field(default_factory=list)  # 文件名解析规则列表
 
 
 def data_path() -> Path:
@@ -52,6 +53,7 @@ def load_config() -> AppConfig:
         video_path_list=list(loaded.get("video_path_list", []) or []),
         page_size=int(loaded.get("page_size", 0) or 0),
         column_size=int(loaded.get("column_size", 4) or 4),
+        parse_rules=list(loaded.get("parse_rules", []) or []),
     )
 
 
@@ -61,5 +63,7 @@ def save_config(cfg: AppConfig) -> None:
         "page_size": cfg.page_size,
         "column_size": cfg.column_size,
     }
+    if cfg.parse_rules:
+        data["parse_rules"] = cfg.parse_rules
     with open(config_file(), "w", encoding="utf-8") as fh:
         yaml.safe_dump(data, fh, allow_unicode=True, sort_keys=False)

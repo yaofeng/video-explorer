@@ -83,6 +83,37 @@
                 />
               </div>
             </div>
+
+            <!-- 文件名解析规则 -->
+            <div>
+              <label class="block text-sm font-medium mb-2 text-slate-700 dark:text-slate-300">文件名解析规则</label>
+              <div v-for="(rule, i) in config.parse_rules" :key="i" class="flex gap-2 mb-2 items-start">
+                <div class="flex-1 grid grid-cols-[1fr_2fr] gap-2">
+                  <input
+                    v-model="rule.name"
+                    type="text"
+                    placeholder="规则名（如 JAV）"
+                    class="h-9 border border-slate-300 dark:border-slate-700 rounded-lg px-3 text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 transition"
+                  />
+                  <input
+                    v-model="rule.pattern"
+                    type="text"
+                    placeholder="正则，如 ^(?P&lt;code&gt;[A-Z]+-\d+)"
+                    class="h-9 border border-slate-300 dark:border-slate-700 rounded-lg px-3 text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 transition font-mono text-[13px]"
+                  />
+                </div>
+                <button
+                  @click="config.removeRule(i)"
+                  class="h-9 w-9 shrink-0 bg-slate-100 dark:bg-slate-800 text-slate-500 hover:bg-red-500 hover:text-white rounded-lg flex items-center justify-center transition"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+                </button>
+              </div>
+              <button
+                @click="config.addRule()"
+                class="h-9 px-3 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700 text-sm font-medium transition"
+              >+ 添加规则</button>
+            </div>
           </div>
 
           <!-- 底部 -->

@@ -60,6 +60,7 @@ class ConfigModel(BaseModel):
     video_path_list: list[str]
     page_size: int
     column_size: int
+    parse_rules: list = []
 
 
 class DirEntry(BaseModel):

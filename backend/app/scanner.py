@@ -2,7 +2,7 @@ import os
 import threading
 import time
 from pathlib import Path
-from . import config, probe, descfile, thumbgen, path_id
+from . import config, probe, cache_index, thumbgen, path_id
 from .probe import resolution_label
 
 VIDEO_EXTS = {".mp4", ".mkv", ".mov", ".avi", ".m4v", ".flv", ".webm", ".wmv", ".ts", ".mpg", ".mpeg", ".3gp", ".rm", ".rmvb"}
@@ -48,99 +48,174 @@ class Scanner:
         state = self._get_l2_state(l2_path)
         with state.lock:
             if state.scanning:
-                return self._build_groups(state), True
+                return self._build_groups(state), True, self._build_progress(state)
 
             state.scanning = True
-            state.thread = threading.Thread(target=self._scan_worker, args=(l2_path, state), daemon=True)
+            state.thread = threading.Thread(
+                target=self._scan_worker, args=(l2_path, state), daemon=True
+            )
             state.thread.start()
 
         # 短暂等待快速扫描
         time.sleep(0.5)
-        return self._build_groups(state), state.scanning
+        return self._build_groups(state), state.scanning, self._build_progress(state)
 
     def _scan_worker(self, l2_path: str, state: _L2State):
         try:
             cfg = config.load_config()
+            root = find_root(l2_path, cfg.video_path_list)
 
             # 收集视频
-            videos = []
-            for root, dirs, files in os.walk(l2_path):
+            video_paths = []
+            for root_dir, dirs, files in os.walk(l2_path):
                 for f in files:
                     if Path(f).suffix.lower() in VIDEO_EXTS:
-                        videos.append(Path(root) / f)
+                        video_paths.append(Path(root_dir) / f)
 
             with state.lock:
-                state.total = len(videos)
+                state.total = len(video_paths)
 
-            for video_path in videos:
+            # ---------------------------------------------------------------
+            # Phase L1 — Fast:  filesystem scan, collect file-level info
+            # ---------------------------------------------------------------
+            for video_path in video_paths:
                 vid = path_id.path_id(str(video_path))
                 self.id_to_path[vid] = str(video_path)
 
-                # 检查缓存
-                cache_path = self._cache_desc_path(str(video_path), cfg)
-                source_mtime = video_path.stat().st_mtime
+                group_name = self._group_name(str(video_path), l2_path)
+                file_size = video_path.stat().st_size
 
-                if cache_path.exists() and cache_path.stat().st_mtime >= source_mtime:
-                    # 缓存有效
-                    try:
-                        desc, _, _ = descfile.read_desc(str(cache_path))
-                        meta = desc
-                        meta["resolution_label"] = resolution_label(meta["height"])
-                    except Exception:
-                        meta = None
+                item = {
+                    "video_id": vid,
+                    "file_name": video_path.name,
+                    "file_size": file_size,
+                    "group": group_name,
+                    "level": 1,
+                    "meta": None,
+                }
+
+                # Persist minimal entry to index.yaml
+                if root:
+                    index_path, _ = cache_index.video_cache_path(
+                        str(root), str(video_path)
+                    )
+                    cache_index.update_video_in_index(
+                        index_path,
+                        {
+                            "file_name": video_path.name,
+                            "file_size_gb": file_size / (1024**3),
+                            "group": group_name,
+                            "level": 1,
+                        },
+                    )
+
+                with state.lock:
+                    state.seq += 1
+                    item["seq"] = state.seq
+                    state.videos[vid] = item
+
+            # ---------------------------------------------------------------
+            # Phase L2 — ffprobe metadata
+            # ---------------------------------------------------------------
+            for video_path in video_paths:
+                vid = path_id.path_id(str(video_path))
+
+                # Skip if already at level >= 2 (e.g. from a previous scan)
+                with state.lock:
+                    if state.videos.get(vid, {}).get("level", 1) >= 2:
+                        continue
+
+                meta = None
+                probe_result = None
+                try:
+                    probe_result = probe.probe_video(str(video_path))
+                    meta = {
+                        "codec": probe_result["codec"],
+                        "width": probe_result["width"],
+                        "height": probe_result["height"],
+                        "duration": probe_result["duration"],
+                        "resolution_str": probe_result["resolution_str"],
+                        "resolution_label": resolution_label(probe_result["height"]),
+                    }
+                except Exception:
+                    meta = None
+
+                with state.lock:
+                    if vid in state.videos:
+                        state.videos[vid]["meta"] = meta
+                        state.videos[vid]["level"] = 2
+                        state.videos[vid]["_probe"] = probe_result  # cached for L3
+
+                if root and meta:
+                    index_path, _ = cache_index.video_cache_path(
+                        str(root), str(video_path)
+                    )
+                    cache_index.update_video_in_index(
+                        index_path,
+                        {
+                            "file_name": video_path.name,
+                            "file_size_gb": video_path.stat().st_size / (1024**3),
+                            "group": self._group_name(str(video_path), l2_path),
+                            "level": 2,
+                            "meta": meta,
+                        },
+                    )
+
+            # ---------------------------------------------------------------
+            # Phase L3 — Thumbnail extraction
+            # ---------------------------------------------------------------
+            for video_path in video_paths:
+                vid = path_id.path_id(str(video_path))
+
+                with state.lock:
+                    entry = state.videos.get(vid)
+                    probe_result = entry.get("_probe") if entry else None
+
+                if probe_result is None:
+                    # Probe failed during L2, nothing to extract from
+                    continue
+
+                try:
+                    png_bytes = thumbgen.extract_frame_from_probe(
+                        str(video_path), probe_result
+                    )
+                except Exception:
+                    png_bytes = None
+
+                if png_bytes and root:
+                    index_path, thumb_path = cache_index.video_cache_path(
+                        str(root), str(video_path)
+                    )
+                    thumb_path.write_bytes(png_bytes)
 
                     with state.lock:
-                        state.videos[vid] = {
-                            "video_id": vid,
-                            "file_name": video_path.name,
-                            "file_size": video_path.stat().st_size,
-                            "group": self._group_name(str(video_path), l2_path),
-                            "ready": meta is not None,
-                            "meta": meta,
-                            "seq": -1,  # 缓存项，不参与增量更新
-                        }
-                else:
-                    # 生成
-                    try:
-                        meta, small_bytes, full_bytes = thumbgen.generate_thumbnails(str(video_path))
-                        meta["resolution_label"] = resolution_label(meta["height"])
-
-                        cache_path.parent.mkdir(parents=True, exist_ok=True)
-                        descfile.write_desc(str(cache_path), meta, small_bytes, full_bytes)
-
-                        item = {
-                            "video_id": vid,
-                            "file_name": video_path.name,
-                            "file_size": video_path.stat().st_size,
-                            "group": self._group_name(str(video_path), l2_path),
-                            "ready": True,
-                            "meta": meta,
-                        }
-                    except Exception:
-                        item = {
-                            "video_id": vid,
-                            "file_name": video_path.name,
-                            "file_size": video_path.stat().st_size,
-                            "group": self._group_name(str(video_path), l2_path),
-                            "ready": False,
-                            "meta": None,
-                        }
+                        if vid in state.videos:
+                            state.videos[vid]["level"] = 3
+                            state.videos[vid].pop("_probe", None)
 
                     with state.lock:
-                        state.seq += 1
-                        item["seq"] = state.seq
-                        state.videos[vid] = item
+                        entry = state.videos.get(vid)
+                        if entry:
+                            cache_index.update_video_in_index(
+                                index_path,
+                                {
+                                    "file_name": video_path.name,
+                                    "file_size_gb": video_path.stat().st_size
+                                    / (1024**3),
+                                    "group": entry.get("group"),
+                                    "level": 3,
+                                    "meta": entry.get("meta"),
+                                    "thumb_file": thumb_path.name,
+                                },
+                            )
 
         finally:
             with state.lock:
                 state.scanning = False
-
-    def _cache_desc_path(self, video_path: str, cfg: config.AppConfig) -> Path:
-        root = find_root(video_path, cfg.video_path_list)
-        if root is None:
-            raise ValueError(f"未找到 {video_path} 的根目录")
-        rel = Path(video_path).resolve().relative_to(root)
-        return config.data_path() / "cache" / rel
+                # Clean up temporary probe data left from L2 (L3 failures /
+                # early-exit path).
+                for entry in state.videos.values():
+                    entry.pop("_probe", None)
 
     def _group_name(self, video_path: str, l2_path: str) -> str:
         v = Path(video_path).resolve()
@@ -163,39 +238,63 @@ class Scanner:
                 groups_dict[g].append(item)
         return [{"name": k, "videos": v} for k, v in groups_dict.items()]
 
+    def _build_progress(self, state: _L2State):
+        with state.lock:
+            level1 = 0
+            level2 = 0
+            level3 = 0
+            for item in state.videos.values():
+                lv = item.get("level", 1)
+                if lv == 1:
+                    level1 += 1
+                elif lv == 2:
+                    level2 += 1
+                elif lv == 3:
+                    level3 += 1
+            return {
+                "total": state.total,
+                "level1": level1,
+                "level2": level2,
+                "level3": level3,
+            }
+
     def status(self, l2_path: str, since: int = 0):
         state = self._get_l2_state(l2_path)
         with state.lock:
             updates = []
             for vid, item in state.videos.items():
-                if item["ready"] and item["meta"] is not None and item.get("seq", -1) > since:
-                    updates.append({
+                if item.get("seq", -1) > since:
+                    entry = {
                         "seq": item["seq"],
                         "video_id": vid,
                         "file_name": item["file_name"],
                         "file_size": item["file_size"],
                         "group": item["group"],
-                        "meta": item["meta"],
-                    })
-            # 按 seq 排序，保证前端按顺序处理
+                        "level": item.get("level", 1),
+                    }
+                    if item.get("meta") is not None:
+                        entry["meta"] = item["meta"]
+                    updates.append(entry)
             updates.sort(key=lambda u: u["seq"])
             return {
                 "scanning": state.scanning,
                 "total": state.total,
-                "ready": sum(1 for v in state.videos.values() if v["ready"]),
+                "ready": sum(1 for v in state.videos.values() if v.get("level", 1) >= 2),
                 "last_seq": state.seq,
+                "progress": self._build_progress(state),
                 "updates": updates,
             }
 
-    def get_thumb(self, video_id: str, full: bool = False):
+    def get_thumb(self, video_id: str):
         if video_id not in self.id_to_path:
             return None
         video_path = self.id_to_path[video_id]
-        cache_path = self._cache_desc_path(video_path, config.load_config())
-        if not cache_path.exists():
+        cfg = config.load_config()
+        root = find_root(video_path, cfg.video_path_list)
+        if root is None:
             return None
-        try:
-            desc, small_thumb, full_thumb = descfile.read_desc(str(cache_path))
-            return full_thumb if full else small_thumb
-        except Exception:
+        index_path, _ = cache_index.video_cache_path(str(root), video_path)
+        thumb_path = cache_index.get_thumb_path(index_path, Path(video_path).name)
+        if thumb_path is None:
             return None
+        return thumb_path.read_bytes()

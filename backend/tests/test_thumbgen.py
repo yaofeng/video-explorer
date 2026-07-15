@@ -25,9 +25,12 @@ def test_extract_frame_returns_none_for_nonexistent():
     assert result is None
 
 
-def test_extract_frame_from_probe_none_on_bad_probe(sample_video):
-    """Verify extract_frame_from_probe returns None when probe data is missing required fields."""
-    result = extract_frame_from_probe(sample_video, {})
+def test_extract_frame_from_probe_none_on_invalid_cover_index(sample_video):
+    """Verify extract_frame_from_probe returns None when cover_stream_index points to a non-existent stream."""
+    result = extract_frame_from_probe(
+        sample_video,
+        {"cover_stream_index": 999, "duration": 0.0},
+    )
     assert result is None
 
 

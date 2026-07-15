@@ -1,21 +1,35 @@
 <template>
-  <div
-    class="bg-white dark:bg-gray-800 rounded shadow overflow-hidden cursor-pointer hover:shadow-lg transition-shadow"
-    @click="$emit('showLightbox', video)"
-  >
-    <div class="relative aspect-video bg-gray-900">
-      <img v-if="video.ready" :src="`/api/thumb/${video.video_id}`" class="w-full h-full object-contain" />
-      <div v-else class="w-full h-full flex items-center justify-center text-gray-400 dark:text-gray-500">加载中...</div>
+  <div class="bg-white dark:bg-gray-800 rounded shadow overflow-hidden cursor-pointer hover:shadow-lg transition-shadow">
+    <div class="relative aspect-video bg-gray-900 flex items-center justify-center">
+      <!-- L3: Thumbnail ready -->
+      <img
+        v-if="video.level >= 3"
+        :src="`/api/thumb/${video.video_id}`"
+        class="w-full h-full object-contain"
+        @click="$emit('showLightbox', video)"
+      />
+      <!-- L1/L2: Loading placeholder -->
+      <p
+        v-else
+        class="text-gray-400 dark:text-gray-500 text-sm"
+        @click="$emit('showLightbox', video)"
+      >
+        加载中...
+      </p>
 
-      <div class="absolute top-2 left-2 bg-black/60 text-white text-xs px-2 py-1 rounded">
-        {{ video.meta?.codec || '-' }}
-      </div>
-      <div class="absolute top-2 right-2 bg-black/60 text-white text-xs px-2 py-1 rounded">
-        {{ video.meta?.resolution_label || '-' }}
-      </div>
-      <div class="absolute bottom-2 left-2 bg-black/60 text-white text-xs px-2 py-1 rounded">
-        {{ formatDuration(video.meta?.duration) }}
-      </div>
+      <!-- L2: Metadata tags appear when level >= 2 -->
+      <template v-if="video.level >= 2 && video.meta">
+        <div class="absolute top-2 left-2 bg-black/60 text-white text-xs px-2 py-1 rounded">
+          {{ video.meta.codec || '-' }}
+        </div>
+        <div class="absolute top-2 right-2 bg-black/60 text-white text-xs px-2 py-1 rounded">
+          {{ formatResolution(video.meta.height) }}
+        </div>
+        <div class="absolute bottom-2 left-2 bg-black/60 text-white text-xs px-2 py-1 rounded">
+          {{ formatDuration(video.meta.duration) }}
+        </div>
+      </template>
+      <!-- Always show file size -->
       <div class="absolute bottom-2 right-2 bg-black/60 text-white text-xs px-2 py-1 rounded">
         {{ formatSize(video.file_size) }}
       </div>
@@ -31,6 +45,16 @@ defineProps<{
 defineEmits<{
   (e: 'showLightbox', video: any): void
 }>()
+
+function formatResolution(height: number): string {
+  if (height >= 2160) return '4K'
+  if (height >= 1440) return '2K'
+  if (height >= 1080) return 'FHD'
+  if (height >= 720) return 'HD'
+  if (height >= 480) return 'SD'
+  if (height >= 360) return 'LD'
+  return height ? `${height}P` : '-'
+}
 
 function formatDuration(sec?: number): string {
   if (!sec) return '-'

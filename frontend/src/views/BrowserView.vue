@@ -1,8 +1,21 @@
 <template>
   <div class="flex flex-col h-screen">
-    <TopMenu :roots="browser.roots" :selected="browser.selectedRootId" @select="onSelectRoot" />
+    <TopMenu
+      :roots="browser.roots"
+      :l1Dirs="browser.l1Dirs"
+      :selectedRoot="browser.selectedRootId"
+      :selectedL1="browser.selectedL1Id"
+      @selectRoot="onSelectRoot"
+      @selectL1="onSelectL1"
+    />
     <div class="flex flex-1 overflow-hidden">
-      <SideMenu :dirs="browser.l2Dirs" :selected="browser.selectedL2Id" @select="onSelectL2" />
+      <SideMenu
+        :dirs="browser.l2Dirs"
+        :selected="browser.selectedL2Id"
+        :scanning="browser.scanning"
+        :progress="browser.progress"
+        @select="onSelectL2"
+      />
       <VideoGrid :groups="browser.groups" :columnSize="config.column_size" @showLightbox="showLightbox" />
     </div>
     <LightboxModal :video="lightboxVideo" @close="lightboxVideo = null" />
@@ -31,6 +44,10 @@ onMounted(async () => {
 
 async function onSelectRoot(id: string) {
   await browser.selectRoot(id)
+}
+
+async function onSelectL1(id: string) {
+  await browser.selectL1(id)
 }
 
 async function onSelectL2(id: string) {

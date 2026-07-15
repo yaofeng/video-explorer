@@ -7,25 +7,29 @@ router = APIRouter()
 
 @router.get("/scan-status", response_model=ScanStatus)
 def scan_status(l2_id: str, since: int = 0):
-    from ..path_id import path_id
+    """Get scan progress and updates since given seq number."""
+    l2_path = _find_l2_path(l2_id)
+    if l2_path is None:
+        raise HTTPException(404, "l2 directory not found")
+
+    status = scanner.status(l2_path, since)
+    return ScanStatus(**status)
+
+
+def _find_l2_path(l2_id: str) -> str | None:
+    """Helper: resolve l2_id to absolute path."""
+    from .. import config, path_id
     from pathlib import Path
-    from .. import config
 
     cfg = config.load_config()
-    l2_path = None
     for root_p in cfg.video_path_list:
         root = Path(root_p).resolve()
         if not root.exists():
             continue
-        for item in root.iterdir():
-            if item.is_dir() and path_id(str(item)) == l2_id:
-                l2_path = str(item)
-                break
-        if l2_path:
-            break
-
-    if l2_path is None:
-        raise HTTPException(404, "未找到 l2 目录")
-
-    status = scanner.status(l2_path, since)
-    return ScanStatus(**status)
+        for l1_item in root.iterdir():
+            if not l1_item.is_dir():
+                continue
+            for l2_item in l1_item.iterdir():
+                if l2_item.is_dir() and path_id.path_id(str(l2_item)) == l2_id:
+                    return str(l2_item)
+    return None

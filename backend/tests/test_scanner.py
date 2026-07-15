@@ -43,6 +43,7 @@ def test_scanner_ensures_scan(video_dir, monkeypatch):
 
     scanner = Scanner()
     l2_path = str(Path(video_dir) / "movies" / "action")
-    groups, scanning = scanner.ensure_scan(l2_path)
+    groups, scanning, progress = scanner.ensure_scan(l2_path)
     assert len(groups) > 0
     assert scanning == False  # 小目录扫描快速完成
+    assert progress["total"] >= 1

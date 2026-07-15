@@ -1,6 +1,14 @@
 <template>
   <div class="flex-1 overflow-auto p-6 bg-slate-50 dark:bg-slate-950">
-    <div v-for="group in groups" :key="group.name" class="mb-8">
+    <div v-if="filteredGroups.length === 0" class="text-center mt-16 text-slate-400 dark:text-slate-500">
+      <p class="text-lg">没有匹配的视频</p>
+      <button
+        v-if="filter.search || filter.codecs.length"
+        @click="clearFilters"
+        class="mt-2 text-sm text-indigo-600 dark:text-indigo-400 hover:underline"
+      >清除筛选条件</button>
+    </div>
+    <div v-for="group in filteredGroups" :key="group.name" class="mb-8">
       <h3
         v-if="group.name !== '未分组'"
         class="text-sm font-semibold mb-3 text-slate-500 dark:text-slate-400 uppercase tracking-wide"
@@ -18,13 +26,77 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
+import { useFilterStore } from '../stores/filter'
 import VideoCard from './VideoCard.vue'
 
-defineProps<{
+const props = defineProps<{
   groups: any[]
   columnSize: number
 }>()
 defineEmits<{
   (e: 'showLightbox', video: any): void
 }>()
+
+const filter = useFilterStore()
+
+const KNOWN_CODECS = ['H264', 'HEVC', 'AV1']
+
+function videoMatches(v: any): boolean {
+  // 搜索过滤
+  if (filter.search) {
+    const q = filter.search.toLowerCase()
+    if (!v.file_name.toLowerCase().includes(q)) return false
+  }
+  // 编码过滤（仅在 meta 就绪时生效）
+  if (filter.codecs.length > 0 && v.meta?.codec) {
+    const c = v.meta.codec
+    if (filter.codecs.includes('OTHER')) {
+      const isKnown = KNOWN_CODECS.includes(c)
+      const isOtherSelected = filter.codecs.includes('OTHER')
+      const knownSelected = filter.codecs.filter(k => KNOWN_CODECS.includes(k))
+      if (isOtherSelected && knownSelected.length === 0) {
+        // 只选了"其他"
+        if (isKnown) return false
+      } else if (isOtherSelected && knownSelected.length > 0) {
+        // 选了"其他"+ 部分已知编码
+        if (!isKnown && !knownSelected.includes(c)) return false
+      } else {
+        // 只选了已知编码
+        if (!knownSelected.includes(c)) return false
+      }
+    } else if (!filter.codecs.includes(c)) {
+      return false
+    }
+  }
+  return true
+}
+
+function videoSorter(a: any, b: any): number {
+  const dir = filter.sortDir === 'asc' ? 1 : -1
+  switch (filter.sortField) {
+    case 'file_name':
+      return dir * a.file_name.localeCompare(b.file_name)
+    case 'file_size':
+      return dir * ((a.file_size || 0) - (b.file_size || 0))
+    case 'modify_time':
+      return dir * ((a.modify_time || 0) - (b.modify_time || 0))
+    default:
+      return 0
+  }
+}
+
+const filteredGroups = computed(() => {
+  return props.groups
+    .map(g => ({
+      name: g.name,
+      videos: (g.videos || []).filter(videoMatches).sort(videoSorter),
+    }))
+    .filter(g => g.videos.length > 0)
+})
+
+function clearFilters() {
+  filter.setSearch('')
+  filter.clearCodecs()
+}
 </script>

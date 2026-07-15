@@ -30,7 +30,98 @@
         {{ l1.name }}
       </button>
 
-      <div class="flex-1"></div>
+      <div class="flex-1 min-w-0"></div>
+
+      <!-- 搜索框 -->
+      <div class="relative">
+        <svg
+          class="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 dark:text-slate-500 pointer-events-none"
+          xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+        >
+          <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+        </svg>
+        <input
+          :value="filter.search"
+          @input="filter.setSearch(($event.target as HTMLInputElement).value)"
+          placeholder="搜索文件名..."
+          class="w-36 lg:w-48 h-9 pl-8 pr-8 bg-slate-100 dark:bg-slate-800 rounded-lg text-sm text-slate-700 dark:text-slate-200 placeholder:text-slate-400 dark:placeholder:text-slate-500 border border-transparent focus:border-indigo-500/50 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition"
+        />
+        <button
+          v-if="filter.search"
+          @click="filter.setSearch('')"
+          class="absolute right-2 top-1/2 -translate-y-1/2 w-5 h-5 flex items-center justify-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+
+      <!-- 排序按钮组 -->
+      <div class="flex items-center gap-0.5 p-0.5 bg-slate-100 dark:bg-slate-800 rounded-lg">
+        <button
+          v-for="s in sortOptions"
+          :key="s.field"
+          @click="filter.setSort(s.field)"
+          :title="s.label + (filter.sortField === s.field ? (filter.sortDir === 'asc' ? ' ↑' : ' ↓') : '')"
+          :class="[
+            'w-8 h-8 flex items-center justify-center rounded-md transition-all duration-200',
+            filter.sortField === s.field
+              ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-sm'
+              : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
+          ]"
+        >
+          <svg v-html="s.icon" class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"/>
+          <!-- 方向指示 -->
+          <span v-if="filter.sortField === s.field" class="text-[9px] ml-0.5">{{ filter.sortDir === 'asc' ? '↑' : '↓' }}</span>
+        </button>
+      </div>
+
+      <!-- 编码过滤 -->
+      <div class="relative">
+        <button
+          @click="codecOpen = !codecOpen"
+          title="编码过滤"
+          :class="[
+            'w-9 h-9 flex items-center justify-center rounded-lg transition',
+            filter.codecs.length
+              ? 'bg-indigo-100 dark:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400'
+              : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+          ]"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>
+          </svg>
+        </button>
+        <!-- 下拉菜单 -->
+        <div
+          v-if="codecOpen"
+          class="absolute right-0 top-full mt-1 w-40 bg-white dark:bg-slate-900 rounded-xl shadow-2xl ring-1 ring-slate-200 dark:ring-slate-800 p-2 z-50"
+        >
+          <div
+            v-for="c in codecOptions"
+            :key="c.value"
+            @click="onCodecToggle(c.value)"
+            class="flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+          >
+            <div
+              :class="[
+                'w-4 h-4 rounded border-2 flex items-center justify-center transition',
+                filter.codecs.includes(c.value)
+                  ? 'bg-indigo-600 border-indigo-600'
+                  : 'border-slate-300 dark:border-slate-600'
+              ]"
+            >
+              <svg v-if="filter.codecs.includes(c.value)" xmlns="http://www.w3.org/2000/svg" class="w-3 h-3 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+            </div>
+            <span class="text-slate-700 dark:text-slate-200">{{ c.label }}</span>
+          </div>
+          <div v-if="filter.codecs.length" class="border-t border-slate-200 dark:border-slate-700 mt-1 pt-1">
+            <button
+              @click="filter.clearCodecs()"
+              class="w-full text-left px-3 py-2 rounded-lg text-sm text-slate-500 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+            >清除筛选</button>
+          </div>
+        </div>
+      </div>
 
       <!-- 主题切换图标组 -->
       <div class="flex items-center gap-0.5 p-0.5 bg-slate-100 dark:bg-slate-800 rounded-lg">
@@ -46,20 +137,9 @@
               : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
           ]"
         >
-          <!-- 电脑（跟随系统） -->
-          <svg v-if="opt.value === 'system'" xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="2" y="3" width="20" height="14" rx="2"/>
-            <path d="M8 21h8M12 17v4"/>
-          </svg>
-          <!-- 太阳（浅色） -->
-          <svg v-else-if="opt.value === 'light'" xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="12" cy="12" r="4"/>
-            <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>
-          </svg>
-          <!-- 月亮（深色） -->
-          <svg v-else xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
-          </svg>
+          <svg v-if="opt.value === 'system'" xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+          <svg v-else-if="opt.value === 'light'" xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+          <svg v-else xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
         </button>
       </div>
 
@@ -76,13 +156,18 @@
       </button>
     </div>
   </div>
+
+  <!-- 遮罩点击关闭 codec 下拉 -->
+  <div v-if="codecOpen" class="fixed inset-0 z-40" @click="codecOpen = false"></div>
 </template>
 
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useThemeStore } from '../stores/theme'
+import { useFilterStore } from '../stores/filter'
 
 type ThemeMode = 'light' | 'dark' | 'system'
+type SortField = 'file_name' | 'file_size' | 'modify_time'
 
 const props = defineProps<{
   roots: { id: string; name: string }[]
@@ -97,14 +182,27 @@ const emit = defineEmits<{
 }>()
 
 const theme = useThemeStore()
-const themeMode = ref<ThemeMode>(theme.mode)
-const selectedRootId = ref(props.selectedRoot || '')
-
+const filter = useFilterStore()
 const themeOptions: { value: ThemeMode; label: string }[] = [
   { value: 'system', label: '跟随系统' },
   { value: 'light', label: '浅色' },
   { value: 'dark', label: '深色' },
 ]
+const sortOptions: { field: SortField; label: string; icon: string }[] = [
+  { field: 'file_name', label: '文件名', icon: '<path d="M3 7v10M7 5v14M11 4v16M15 9v6M19 2v20"/><polyline points="21 15 15 21"/><polyline points="3 21 9 15"/>' },
+  { field: 'file_size', label: '文件大小', icon: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>' },
+  { field: 'modify_time', label: '修改时间', icon: '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>' },
+]
+const codecOptions = [
+  { value: 'H264', label: 'H264' },
+  { value: 'HEVC', label: 'HEVC' },
+  { value: 'AV1', label: 'AV1' },
+  { value: 'OTHER', label: '其他' },
+]
+
+const themeMode = ref<ThemeMode>(theme.mode)
+const selectedRootId = ref(props.selectedRoot || '')
+const codecOpen = ref(false)
 
 function setTheme(mode: ThemeMode) {
   themeMode.value = mode
@@ -115,5 +213,19 @@ function onRootChange() {
   if (selectedRootId.value) {
     emit('selectRoot', selectedRootId.value)
   }
+}
+
+function onCodecToggle(val: string) {
+  if (val === 'OTHER') {
+    const known = ['H264', 'HEVC', 'AV1']
+    const hasOther = filter.codecs.includes('OTHER')
+    if (hasOther) {
+      filter.setCodecs(filter.codecs.filter(c => c !== 'OTHER'))
+    } else {
+      filter.setCodecs([...filter.codecs.filter(c => known.includes(c)), 'OTHER'])
+    }
+    return
+  }
+  filter.toggleCodec(val)
 }
 </script>

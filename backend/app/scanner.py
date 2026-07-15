@@ -211,6 +211,7 @@ class Scanner:
                             "video_id": vid,
                             "file_name": video_path.name,
                             "file_size": video_path.stat().st_size,
+                            "modify_time": source_mtime,
                             "group": self._group_name(str(video_path), l2_path),
                             "level": 3,
                             "meta": meta,
@@ -232,11 +233,13 @@ class Scanner:
 
                 group_name = self._group_name(str(video_path), l2_path)
                 file_size = video_path.stat().st_size
+                file_mtime = int(video_path.stat().st_mtime)
 
                 item = {
                     "video_id": vid,
                     "file_name": video_path.name,
                     "file_size": file_size,
+                    "modify_time": file_mtime,
                     "group": group_name,
                     "level": 1,
                     "meta": None,

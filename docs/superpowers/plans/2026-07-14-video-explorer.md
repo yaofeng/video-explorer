@@ -841,7 +841,7 @@ git commit -m "feat(thumbgen): add dual thumbnail generation with fallback to pl
 ## 第三阶段：后端扫描器与 API（TDD）
 
 > **设计变更：** cache 改为 `index.yaml` + `.jpg` 缩略图方案：
-> - 每目录一个 `index.yaml`（文件名、大小GB、原始分辨率、编码、创建/修改时间、缩略图文件名）
+> - 每目录一个 `index.yaml`（扁平结构：文件名、分组、level、创建/修改时间、大小MB、编码、宽高、时长秒、分辨率标签、缩略图文件名）
 > - 缩略图为原始帧 `.jpg`，不做服务端尺寸/比例适配
 > - `scanner.py` 改为操作 `cache_index.py` 读写 index.yaml
 > - API 导航层级：roots（视频库根目录）→ l1（一级目录/顶部菜单）→ l2（二级目录/左侧菜单）

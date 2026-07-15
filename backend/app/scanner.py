@@ -12,6 +12,55 @@ VIDEO_EXTS = {".mp4", ".mkv", ".mov", ".avi", ".m4v", ".flv", ".webm", ".wmv", "
 MAX_CACHED_L2_DIRS = 20
 
 
+def _build_cache_entry(video_path: Path, item: dict, level: int,
+                       thumb_file: str | None = None) -> dict:
+    """构建扁平化的 index.yaml 条目。
+
+    字段：file_name, group, level, create_time, modify_time, file_size(MB 整数),
+    codec, width, height, duration(秒 整数), resolution_label, thumb_file(可选)。
+    """
+    stat = video_path.stat()
+    meta = item.get("meta") or {}
+    entry = {
+        "file_name": video_path.name,
+        "group": item.get("group"),
+        "level": level,
+        "create_time": int(stat.st_ctime),
+        "modify_time": stat.st_mtime,
+        "file_size": int(stat.st_size / (1024 * 1024)),  # MB 整数
+    }
+    if meta:
+        entry["codec"] = meta.get("codec")
+        entry["width"] = meta.get("width")
+        entry["height"] = meta.get("height")
+        entry["duration"] = int(meta.get("duration", 0) or 0)  # 秒 整数
+        entry["resolution_label"] = meta.get("resolution_label")
+    if thumb_file:
+        entry["thumb_file"] = thumb_file
+    return entry
+
+
+def _meta_from_cache(cached: dict) -> dict | None:
+    """从扁平缓存条目重建内存中的 meta 字典（供 API 返回）。
+
+    内存 meta 保留 resolution_str 和字节级 file_size 以兼容现有 API。
+    """
+    if not cached.get("codec"):
+        return None
+    width = cached.get("width", 0) or 0
+    height = cached.get("height", 0) or 0
+    file_size_mb = cached.get("file_size", 0) or 0
+    return {
+        "codec": cached["codec"],
+        "width": width,
+        "height": height,
+        "duration": float(cached.get("duration", 0) or 0),
+        "resolution_str": f"{width}x{height}",
+        "file_size": file_size_mb * 1024 * 1024,  # MB → bytes
+        "resolution_label": cached.get("resolution_label", ""),
+    }
+
+
 def find_root(video_path: str, roots: list[str]) -> Path | None:
     p = Path(video_path).resolve()
     best = None
@@ -137,8 +186,8 @@ class Scanner:
                     # 缓存有效性：modify_time 记录源文件上次扫描时的 mtime
                     if cached.get("modify_time", 0) < source_mtime:
                         continue  # 源文件已更新，缓存过期
-                    meta = cached.get("meta")
-                    if cached.get("level", 1) >= 3 and meta and thumb_path.exists():
+                    if cached.get("level", 1) >= 3 and cached.get("thumb_file") and thumb_path.exists():
+                        meta = _meta_from_cache(cached)
                         item = {
                             "video_id": vid,
                             "file_name": video_path.name,
@@ -181,13 +230,7 @@ class Scanner:
                     )
                     cache_index.update_video_in_index(
                         index_path,
-                        {
-                            "file_name": video_path.name,
-                            "file_size_gb": file_size / (1024**3),
-                            "group": group_name,
-                            "level": 1,
-                            "modify_time": video_path.stat().st_mtime,
-                        },
+                        _build_cache_entry(video_path, item, level=1),
                     )
 
                 with state.lock:
@@ -232,16 +275,10 @@ class Scanner:
                     index_path, _ = cache_index.video_cache_path(
                         str(root), str(video_path)
                     )
+                    tmp_item = {"group": self._group_name(str(video_path), l2_path), "meta": meta}
                     cache_index.update_video_in_index(
                         index_path,
-                        {
-                            "file_name": video_path.name,
-                            "file_size_gb": video_path.stat().st_size / (1024**3),
-                            "group": self._group_name(str(video_path), l2_path),
-                            "level": 2,
-                            "meta": meta,
-                            "modify_time": video_path.stat().st_mtime,
-                        },
+                        _build_cache_entry(video_path, tmp_item, level=2),
                     )
 
             # ---------------------------------------------------------------
@@ -286,15 +323,9 @@ class Scanner:
                 if entry_snapshot:
                     cache_index.update_video_in_index(
                         index_path,
-                        {
-                            "file_name": video_path.name,
-                            "file_size_gb": video_path.stat().st_size / (1024**3),
-                            "group": entry_snapshot.get("group"),
-                            "level": 3,
-                            "meta": entry_snapshot.get("meta"),
-                            "thumb_file": thumb_path.name,
-                            "modify_time": video_path.stat().st_mtime,
-                        },
+                        _build_cache_entry(
+                            video_path, entry_snapshot, level=3, thumb_file=thumb_path.name
+                        ),
                     )
 
         finally:

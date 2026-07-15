@@ -119,27 +119,45 @@ $DATA_PATH/cache/
 
 ### 5.2 index.yaml 格式
 
-每个目录下的 `index.yaml` 保存该目录直接包含（不含递归子目录）的所有视频基础信息：
+每个目录下的 `index.yaml` 保存该目录直接包含（不含递归子目录）的所有视频基础信息，**扁平结构**（无 meta 嵌套层级）：
 
 ```yaml
 videos:
   - file_name: "dune.mkv"           # 文件名
-    file_size_gb: 8.0                # 文件大小，单位 GB
-    resolution: "3840x2160"          # 原始分辨率
-    codec: "HEVC"                    # H264 / HEVC / ...
-    create_time: 1720900000          # 创建时间，epoch 秒
-    modify_time: 1720900000.0        # 修改时间，epoch 秒
-    thumb_file: "dune.jpg"          # 缩略图文件名
+    group: "未分组"                  # 分组名
+    level: 3                         # 处理层级：1=文件名 2=+元数据 3=+缩略图
+    create_time: 1720900000          # 创建时间，epoch 秒（整数）
+    modify_time: 1720900000.9        # 修改时间，epoch 秒（浮点）
+    file_size: 8192                  # 文件大小，单位 MB（整数）
+    codec: "HEVC"                    # 编码（level>=2 才有）
+    width: 3840                      # 宽（level>=2 才有）
+    height: 2160                     # 高（level>=2 才有）
+    duration: 9123                   # 时长，单位秒（整数，level>=2 才有）
+    resolution_label: "4K"           # 分辨率标签（level>=2 才有）
+    thumb_file: "dune.jpg"           # 缩略图文件名（level=3 才有）
   - file_name: "blade-runner.mkv"
-    file_size_gb: 6.4
-    resolution: "1920x1080"
-    codec: "H264"
+    group: "科幻"
+    level: 3
     create_time: 1720900100
-    modify_time: 1720900100.0
+    modify_time: 1720900100.5
+    file_size: 6553
+    codec: "H264"
+    width: 1920
+    height: 1080
+    duration: 7421
+    resolution_label: "FHD"
     thumb_file: "blade-runner.jpg"
 ```
 
-扫描时先快速填充 `index.yaml`（仅文件系统探知大小/时间），再异步逐个提取缩略图并更新 `index.yaml` 中的 `thumb_file` 字段。
+**字段说明**：
+- `file_size`：单位 **MB（兆）**，整数（`int(字节数 / 1048576)`）
+- `duration`：单位 **秒**，整数（`int(秒数)`）
+- `create_time`：源文件创建时间（`st_ctime`）
+- `modify_time`：源文件修改时间（`st_mtime`），用于缓存有效性判断
+- 无 `meta` 嵌套层级，元数据字段直接平铺
+- 无 `file_size_gb`、无 `resolution_str` 字段
+
+扫描时先快速填充 `index.yaml`（level=1，仅文件系统探知大小/时间），再异步提取元数据（level=2）和缩略图（level=3），逐步更新。
 
 ### 5.3 缩略图存储
 

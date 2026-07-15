@@ -33,8 +33,9 @@
 
     <!-- 文件名 / 解析信息 -->
     <div class="px-3 py-2">
-      <template v-if="video.ext && video.ext.title">
-        <div class="text-sm text-slate-700 dark:text-slate-200 leading-snug line-clamp-1 mb-1" :title="video.ext.title">{{ video.ext.title }}</div>
+      <template v-if="video.ext">
+        <div v-if="video.ext.title" class="text-sm text-slate-700 dark:text-slate-200 leading-snug line-clamp-1 mb-1" :title="video.ext.title">{{ video.ext.title }}</div>
+        <div v-else class="text-sm text-slate-500 dark:text-slate-400 leading-snug line-clamp-1 mb-1">{{ video.file_name }}</div>
         <div class="flex flex-wrap gap-1">
           <span
             v-for="(val, key) in extLabels"

@@ -3,64 +3,82 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from .. import config
-from ..scanner import _parse_filename
+from ..scanner import _parse_filename, find_root
+from ..cache_index import video_cache_path
 
 router = APIRouter()
 
 
 class TestRuleRequest(BaseModel):
-    rules: list[dict]  # [{name, pattern}, ...]
-    cache_dir: str  # 缓存目录路径
+    rules: list[dict]
+    source_dir: str  # 源视频目录路径（非缓存路径），API 自动映射到缓存
 
 
 class TestRuleResult(BaseModel):
     file_name: str
-    matched_rule: str | None = None  # 匹配的规则名
-    ext: dict | None = None  # 解析结果
+    matched_rule: str | None = None
+    ext: dict | None = None
 
 
 class TestRuleResponse(BaseModel):
     results: list[TestRuleResult]
-    field_names: list[str]  # 所有出现的 ext 字段名（用于表头）
+    field_names: list[str]
 
 
 @router.post("/parse-rules/test", response_model=TestRuleResponse)
 def test_parse_rules(req: TestRuleRequest):
-    """用给定的规则测试一个缓存目录下的所有 index.yaml 文件。
+    """用给定的规则测试指定源视频目录下的文件名解析。
 
+    内部将 source_dir 映射到缓存目录后读取 index.yaml。
     规则按顺序匹配，第一条匹配成功的规则生效。
-    返回每个视频文件的解析结果表格数据。
     """
-    dir_path = Path(req.cache_dir)
-    if not dir_path.exists() or not dir_path.is_dir():
-        raise HTTPException(400, f"directory not found: {req.cache_dir}")
+    source = Path(req.source_dir).resolve()
+    if not source.exists() or not source.is_dir():
+        raise HTTPException(400, f"directory not found: {req.source_dir}")
 
-    # 收集所有 index.yaml 中的文件名
+    # 从配置文件加载根目录列表
+    cfg = config.load_config()
+    root = find_root(str(source), cfg.video_path_list)
+    if root is None:
+        raise HTTPException(400, f"directory not under any configured video root: {req.source_dir}")
+
+    # 取该目录下的第一个视频文件（任何扩展名）来获取缓存路径
+    # 缓存路径是按根目录划分的，同一目录下的视频共享同一 index.yaml
+    first_video = None
+    exts = {".mp4", ".mkv", ".mov", ".avi", ".m4v", ".flv", ".webm", ".wmv", ".ts", ".mpg", ".mpeg", ".3gp", ".rm", ".rmvb"}
+    for f in source.iterdir():
+        if f.is_file() and f.suffix.lower() in exts:
+            first_video = str(f)
+            break
+
+    if first_video is None:
+        raise HTTPException(400, f"no video files found in source directory: {req.source_dir}")
+
+    index_path, _ = video_cache_path(str(root), first_video)
+    if not index_path.exists():
+        raise HTTPException(400, f"cache not built yet for this directory (no index.yaml at {index_path.parent}). Run '构建索引' first.")
+
+    import yaml
     file_names = []
-    for yaml_file in dir_path.rglob("index.yaml"):
-        try:
-            import yaml
-            data = yaml.safe_load(yaml_file.read_text(encoding="utf-8"))
-            if data and "videos" in data:
-                for v in data["videos"]:
-                    fn = v.get("file_name", "")
-                    if fn:
-                        file_names.append(fn)
-        except Exception:
-            continue
+    try:
+        data = yaml.safe_load(index_path.read_text(encoding="utf-8"))
+        if data and "videos" in data:
+            for v in data["videos"]:
+                fn = v.get("file_name", "")
+                if fn:
+                    file_names.append(fn)
+    except Exception as e:
+        raise HTTPException(400, f"failed to read index.yaml: {e}")
 
     if not file_names:
-        raise HTTPException(400, "no index.yaml files found with videos in directory")
+        raise HTTPException(400, f"no videos found in {index_path}")
 
-    # 去重并排序
     file_names = sorted(set(file_names))
 
-    # 应用规则
     results = []
     all_fields = set()
     for fn in file_names:
         ext = _parse_filename(fn, req.rules)
-        # 找到匹配的规则名
         matched_rule = None
         if ext:
             for rule in req.rules:

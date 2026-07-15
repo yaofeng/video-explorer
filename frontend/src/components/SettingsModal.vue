@@ -87,7 +87,26 @@
             <!-- 文件名解析规则 -->
             <div>
               <label class="block text-sm font-medium mb-2 text-slate-700 dark:text-slate-300">文件名解析规则</label>
-              <div v-for="(rule, i) in config.parse_rules" :key="i" class="flex gap-2 mb-2 items-start">
+              <div v-for="(rule, i) in config.parse_rules" :key="i" class="flex gap-1.5 mb-2 items-start">
+                <!-- 顺序调整按钮 -->
+                <div class="flex flex-col gap-0.5 pt-1">
+                  <button
+                    @click="moveRule(i, 'up')"
+                    :disabled="i === 0"
+                    class="w-5 h-4 flex items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 disabled:opacity-30 disabled:cursor-not-allowed transition"
+                    title="上移"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m18 15-6-6-6 6"/></svg>
+                  </button>
+                  <button
+                    @click="moveRule(i, 'down')"
+                    :disabled="i === config.parse_rules.length - 1"
+                    class="w-5 h-4 flex items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 disabled:opacity-30 disabled:cursor-not-allowed transition"
+                    title="下移"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m6 9 6 6 6-6"/></svg>
+                  </button>
+                </div>
                 <div class="flex-1 grid grid-cols-[1fr_2fr] gap-2">
                   <input
                     v-model="rule.name"
@@ -109,10 +128,16 @@
                   <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
                 </button>
               </div>
-              <button
-                @click="config.addRule()"
-                class="h-9 px-3 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700 text-sm font-medium transition"
-              >+ 添加规则</button>
+              <div class="flex gap-2">
+                <button
+                  @click="config.addRule()"
+                  class="h-9 px-3 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700 text-sm font-medium transition"
+                >+ 添加规则</button>
+                <button
+                  @click="ruleTestOpen = true"
+                  class="h-9 px-3 bg-indigo-100 dark:bg-indigo-500/20 text-indigo-700 dark:text-indigo-300 rounded-lg hover:bg-indigo-200 dark:hover:bg-indigo-500/30 text-sm font-medium transition"
+                >规则测试</button>
+              </div>
             </div>
           </div>
 
@@ -131,6 +156,12 @@
       </transition>
     </div>
   </transition>
+
+  <RuleTestModal
+    :open="ruleTestOpen"
+    :rules="config.parse_rules"
+    @close="ruleTestOpen = false"
+  />
 </template>
 
 <script setup lang="ts">
@@ -138,6 +169,7 @@ import { reactive, ref, watch } from 'vue'
 import axios from 'axios'
 import { useConfigStore } from '../stores/config'
 import { useTaskStore } from '../stores/task'
+import RuleTestModal from './RuleTestModal.vue'
 
 const props = defineProps<{ open: boolean }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
@@ -147,6 +179,7 @@ const taskStore = useTaskStore()
 
 const building = reactive<Record<number, boolean>>({})
 const pathToId = ref<Record<string, string>>({})
+const ruleTestOpen = ref(false)
 
 watch(() => props.open, async (isOpen) => {
   if (!isOpen) return
@@ -163,6 +196,13 @@ watch(() => props.open, async (isOpen) => {
     /* ignore */
   }
 }, { immediate: true })
+
+function moveRule(i: number, dir: 'up' | 'down') {
+  const j = dir === 'up' ? i - 1 : i + 1
+  if (j < 0 || j >= config.parse_rules.length) return
+  const arr = config.parse_rules
+  ;[arr[i], arr[j]] = [arr[j], arr[i]]
+}
 
 async function save() {
   await config.update()

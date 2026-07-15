@@ -5,7 +5,7 @@ from pathlib import Path
 from contextlib import asynccontextmanager
 from . import config
 from .security import IPWhitelistMiddleware
-from .routes import config as config_routes, dirs, videos, scan
+from .routes import config as config_routes, dirs, videos, scan, parse_rules
 import logging
 from logging.handlers import RotatingFileHandler
 
@@ -40,6 +40,7 @@ app.include_router(config_routes.router, prefix="/api")
 app.include_router(dirs.router, prefix="/api")
 app.include_router(videos.router, prefix="/api")
 app.include_router(scan.router, prefix="/api")
+app.include_router(parse_rules.router, prefix="/api")
 
 
 @app.get("/api/health")

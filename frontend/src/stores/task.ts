@@ -21,7 +21,7 @@ export const useTaskStore = defineStore('task', {
     active: false,  // 是否正在轮询
   }),
   getters: {
-    visible(state): Task[] {
+    visibleTasks(state): Task[] {
       const now = Date.now()
       const done = state.completed
         .filter(c => now - c.at < 2000)

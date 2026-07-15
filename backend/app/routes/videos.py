@@ -21,12 +21,19 @@ def get_videos(l2_id: str):
 
 
 @router.get("/thumb/{video_id}")
-def get_thumb(video_id: str):
-    """Get thumbnail PNG for a video. Returns 202 if not ready."""
-    thumb_data = scanner.get_thumb(video_id)
-    if thumb_data is None:
+def get_thumb(video_id: str, size: str = "full"):
+    """获取缩略图。size=small 返回压缩小图（卡片用），默认 full 返回原始 PNG（浮层用）。
+    未就绪返回 202。响应带长缓存头供浏览器复用。"""
+    small = size == "small"
+    result = scanner.get_thumb(video_id, small=small)
+    if result is None:
         return Response(status_code=202, content="thumbnail not ready")
-    return Response(content=thumb_data, media_type="image/png")
+    media_type, thumb_bytes = result
+    return Response(
+        content=thumb_bytes,
+        media_type=media_type,
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
 
 
 def _find_l2_path(l2_id: str) -> str | None:

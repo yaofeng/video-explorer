@@ -4,11 +4,18 @@ Returns raw PNG bytes with no server-side image processing
 (resizing, aspect-ratio adjustment, or letterboxing).
 """
 
+import io
 import subprocess
+
+from PIL import Image
 
 from .probe import probe_video
 
 SEEK_TIME = 210.0  # 3:30
+
+# 小缩略图目标宽度（卡片用），等比缩放，JPEG 压缩
+SMALL_WIDTH = 480
+SMALL_JPEG_QUALITY = 85
 
 
 def _extract_frame(path: str, probe: dict) -> bytes | None:
@@ -67,3 +74,19 @@ def extract_frame_from_probe(path: str, probe: dict) -> bytes | None:
     ``duration`` (float).  Returns ``None`` when ffmpeg fails.
     """
     return _extract_frame(path, probe)
+
+
+def make_small_jpeg(png_bytes: bytes, target_width: int = SMALL_WIDTH) -> bytes:
+    """将原始 PNG 帧等比缩小为 JPEG（卡片预览用）。
+
+    仅缩放尺寸 + JPEG 压缩，不改变宽高比、不加黑边。
+    """
+    img = Image.open(io.BytesIO(png_bytes))
+    if img.width > target_width:
+        ratio = target_width / img.width
+        new_size = (target_width, max(1, round(img.height * ratio)))
+        img = img.resize(new_size, Image.LANCZOS)
+    img = img.convert("RGB")
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=SMALL_JPEG_QUALITY)
+    return buf.getvalue()

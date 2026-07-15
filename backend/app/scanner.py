@@ -104,9 +104,6 @@ class Scanner:
             with state.lock:
                 state.total = len(video_paths)
 
-            # ---------------------------------------------------------------
-            # Phase L1 — 快速阶段：文件系统扫描，收集文件级信息
-            # ---------------------------------------------------------------
             # 批量注册 id_to_path（一次加锁，减少竞争）
             id_path_map = {}
             for video_path in video_paths:
@@ -115,8 +112,55 @@ class Scanner:
             with self._lock:
                 self._id_to_path.update(id_path_map)
 
+            # ---------------------------------------------------------------
+            # Phase L0 — 读缓存预填充：已完整缓存的视频（level 3 + 缩略图存在）
+            # 直接标记 level 3，跳过昂贵的 ffprobe/抽帧，实现秒开。
+            # ---------------------------------------------------------------
+            fully_cached_vids = set()
+            if root:
+                for video_path in video_paths:
+                    vid = path_id.path_id(str(video_path))
+                    try:
+                        source_mtime = video_path.stat().st_mtime
+                    except OSError:
+                        continue
+                    index_path, thumb_path = cache_index.video_cache_path(
+                        str(root), str(video_path)
+                    )
+                    cached_entries = cache_index.load_index(index_path)
+                    cached = next(
+                        (v for v in cached_entries if v.get("file_name") == video_path.name),
+                        None,
+                    )
+                    if not cached:
+                        continue
+                    # 缓存有效性：modify_time 记录源文件上次扫描时的 mtime
+                    if cached.get("modify_time", 0) < source_mtime:
+                        continue  # 源文件已更新，缓存过期
+                    meta = cached.get("meta")
+                    if cached.get("level", 1) >= 3 and meta and thumb_path.exists():
+                        item = {
+                            "video_id": vid,
+                            "file_name": video_path.name,
+                            "file_size": video_path.stat().st_size,
+                            "group": self._group_name(str(video_path), l2_path),
+                            "level": 3,
+                            "meta": meta,
+                        }
+                        with state.lock:
+                            state.seq += 1
+                            item["seq"] = state.seq
+                            state.videos[vid] = item
+                        fully_cached_vids.add(vid)
+
+            # ---------------------------------------------------------------
+            # Phase L1 — 快速阶段：文件系统扫描，收集文件级信息
+            # （跳过已完整缓存的视频）
+            # ---------------------------------------------------------------
             for video_path in video_paths:
                 vid = path_id.path_id(str(video_path))
+                if vid in fully_cached_vids:
+                    continue
 
                 group_name = self._group_name(str(video_path), l2_path)
                 file_size = video_path.stat().st_size
@@ -142,6 +186,7 @@ class Scanner:
                             "file_size_gb": file_size / (1024**3),
                             "group": group_name,
                             "level": 1,
+                            "modify_time": video_path.stat().st_mtime,
                         },
                     )
 
@@ -195,6 +240,7 @@ class Scanner:
                             "group": self._group_name(str(video_path), l2_path),
                             "level": 2,
                             "meta": meta,
+                            "modify_time": video_path.stat().st_mtime,
                         },
                     )
 
@@ -247,6 +293,7 @@ class Scanner:
                             "level": 3,
                             "meta": entry_snapshot.get("meta"),
                             "thumb_file": thumb_path.name,
+                            "modify_time": video_path.stat().st_mtime,
                         },
                     )
 
@@ -350,7 +397,12 @@ class Scanner:
             "updates": updates,
         }
 
-    def get_thumb(self, video_id: str):
+    def get_thumb(self, video_id: str, small: bool = False):
+        """返回缩略图字节。
+
+        small=True 返回压缩后的小 JPEG（卡片用，懒生成并缓存为 .small.jpg）；
+        small=False 返回原始 PNG（浮层用）。
+        """
         with self._lock:
             video_path = self._id_to_path.get(video_id)
         if video_path is None:
@@ -360,7 +412,14 @@ class Scanner:
         if root is None:
             return None
         index_path, _ = cache_index.video_cache_path(str(root), video_path)
-        thumb_path = cache_index.get_thumb_path(index_path, Path(video_path).name)
-        if thumb_path is None:
+        png_path = cache_index.get_thumb_path(index_path, Path(video_path).name)
+        if png_path is None:
             return None
-        return thumb_path.read_bytes()
+        if small:
+            small_path = png_path.with_suffix(".small.jpg")
+            if not small_path.exists() or small_path.stat().st_mtime < png_path.stat().st_mtime:
+                # 懒生成小图（或源 PNG 更新后重建）
+                small_bytes = thumbgen.make_small_jpeg(png_path.read_bytes())
+                small_path.write_bytes(small_bytes)
+            return ("image/jpeg", small_path.read_bytes())
+        return ("image/png", png_path.read_bytes())

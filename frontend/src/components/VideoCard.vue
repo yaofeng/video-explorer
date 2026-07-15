@@ -4,7 +4,7 @@
       <!-- L3: Thumbnail ready -->
       <img
         v-if="video.level >= 3"
-        :src="`/api/thumb/${video.video_id}`"
+        :src="`/api/thumb/${video.video_id}?size=small`"
         class="w-full h-full object-contain"
         @click="$emit('showLightbox', video)"
       />

@@ -1,5 +1,5 @@
 <template>
-  <div class="min-h-screen bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100">
+  <div class="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-colors duration-200">
     <router-view />
     <TaskToast />
   </div>
@@ -16,7 +16,6 @@ const task = useTaskStore()
 
 onMounted(() => {
   theme.init()
-  // 启动时检查是否有运行中的任务
   task.startPolling()
 })
 </script>

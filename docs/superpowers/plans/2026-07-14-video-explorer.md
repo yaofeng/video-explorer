@@ -2,6 +2,17 @@
 
 > **给代理工作者：** 必填子技能：使用 superpowers:subagent-driven-development（推荐）或 superpowers:executing-plans 逐任务实施此计划。步骤使用复选框（`- [ ]`）语法进行跟踪。
 
+> **实施状态说明（2026-07-16 更新）：** 代码已演进到超越本计划的阶段。实际实现与计划的关键差异：
+> - ✅ 服务模块已重组：`scanner.py`、`thumbgen.py`、`probe.py`、`cache_index.py` 移至 `backend/app/services/` 子目录
+> - ✅ API 响应扁平化：视频条目直接包含 codec/width/height/duration/resolution_label，无 meta 嵌套
+> - ✅ 文件大小统一：缓存（index.yaml）和 API 均以 MB 为单位（整数），前端显示时转换为 GB
+> - ✅ `probe.py` 仅返回原始分辨率字段，`resolution_label` 由前端计算
+> - ✅ 设置界面为模态框（`SettingsModal.vue`），非独立路由
+> - ✅ 实现组内分页（`VideoGrid.vue`）
+> - ✅ 顶栏包含搜索、排序、编码过滤、主题切换、设置按钮
+> - ✅ 任务进度 Toast（`TaskToast.vue`）和规则测试器（`RuleTestModal.vue`）
+> - ✅ 筛选状态持久化到 localStorage
+
 **目标：** 构建一个视频库浏览器，使用 Python 后端（FastAPI）和 Vue3 前端，支持分层目录导航、渐进式缩略图生成和设置管理。
 
 **架构：** FastAPI 提供 API 端点和静态前端服务。Vue3 SPA 使用 Tailwind CSS 构建 UI。后台工作队列处理渐进式数据获取（L1：目录遍历→L2：ffprobe→L3：缩略图）。每目录 `index.yaml` 缓存视频基础信息，`.jpg` 缩略图分离存储不做服务端尺寸/比例处理。IP 白名单中间件保护访问安全。
@@ -20,7 +31,7 @@
 - Python 3.12 虚拟环境由 uv 管理，位于 `backend/.venv`
 - 后端端口：8000（通过 `BACKEND_PORT` 环境变量）
 - 日志文件轮转存储在 `$DATA_PATH/logs/`
-- vue-router 用于 `/settings` 路由
+- vue-router 用于主页面路由（设置使用模态框，非独立路由）
 - 单 uvicorn worker（扫描状态在进程内）
 - 缩略图降级策略：3:30 位置 → 中点 → 跳过
 - 不存在的 `video_path` 条目：跳过并警告
@@ -154,7 +165,11 @@ git commit -m "chore: initialize project structure and dependencies"
 > **设计变更：** 以下是按最新设计文档重新描述的后端模块。关键差异：
 > - 删除 `descfile.py`（二进制描述文件），新增 `cache_index.py`（index.yaml + .jpg 缩略图管理）
 > - `thumbgen.py` 只做原始帧提取（ffmpeg），不做任何服务端图片处理
-> - `probe.py` 返回原始分辨率字段，`resolution_label` 改由前端计算
+> - `probe.py` 仅返回原始分辨率字段（width/height），不计算 `resolution_label`
+> - `scanner.py` 包含本地 `_resolution_label()` 辅助函数，用于写入缓存时计算分辨率标签
+> - 服务模块重组：`scanner.py`、`thumbgen.py`、`probe.py`、`cache_index.py` 移至 `backend/app/services/` 子目录
+> - API 响应扁平化：视频条目直接包含 codec/width/height/duration/resolution_label，无 meta 嵌套
+> - 文件大小统一：缓存（index.yaml）和 API 均以 MB 为单位（整数），前端显示时转换为 GB
 
 ### 任务 2：配置模块（TDD）
 
@@ -441,7 +456,7 @@ git commit -m "feat(security): add IP whitelist middleware with localhost bypass
 ### 任务 5：探测模块（TDD）
 
 **文件：**
-- 创建：`backend/app/probe.py`、`backend/tests/test_probe.py`
+- 创建：`backend/app/services/probe.py`、`backend/tests/test_probe.py`
 
 - [ ] **步骤 1：创建测试辅助工具生成示例视频**
 
@@ -468,7 +483,7 @@ def sample_video(tmp_path):
 
 写入 `backend/tests/test_probe.py`：
 ```python
-from app.probe import probe_video, resolution_label
+from app.services.probe import probe_video
 
 def test_probe_video(sample_video):
     result = probe_video(sample_video)
@@ -479,15 +494,10 @@ def test_probe_video(sample_video):
     assert result["width"] == 320
     assert result["height"] == 240
     assert result["duration"] >= 1.5
-
-def test_resolution_label():
-    assert resolution_label(2160) == "4K"
-    assert resolution_label(1440) == "2K"
-    assert resolution_label(1080) == "FHD"
-    assert resolution_label(720) == "HD"
-    assert resolution_label(480) == "SD"
-    assert resolution_label(360) == "LD"
-    assert resolution_label(0) == "Unknown"
+    assert isinstance(result["file_size"], int)
+    assert result["file_size"] >= 0  # 小视频可能不足 1MB，整数除法结果为 0
+    # probe.py 不再返回 resolution_str（由前端计算）
+    assert "resolution_str" not in result
 ```
 
 - [ ] **步骤 3：运行测试验证失败**
@@ -500,12 +510,18 @@ pytest tests/test_probe.py -v
 
 - [ ] **步骤 4：编写实现**
 
-写入 `backend/app/probe.py`：
+写入 `backend/app/services/probe.py`：
 ```python
 import json
+import os
 import subprocess
 
+
 def probe_video(path: str) -> dict:
+    """使用 ffprobe 读取视频元数据。
+
+    返回原始分辨率字段（width, height），不计算 resolution_label。
+    """
     cmd = [
         "ffprobe", "-v", "error",
         "-show_streams", "-show_format",
@@ -515,10 +531,12 @@ def probe_video(path: str) -> dict:
         out = subprocess.run(cmd, capture_output=True, text=True, timeout=60, check=True)
     except subprocess.CalledProcessError as e:
         raise RuntimeError(f"ffprobe failed: {e.stderr}")
-    
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(f"ffprobe timed out for: {path}")
+
     data = json.loads(out.stdout)
     streams = data.get("streams", [])
-    
+
     vstream = None
     cover_index = None
     for i, s in enumerate(streams):
@@ -531,37 +549,25 @@ def probe_video(path: str) -> dict:
             else:
                 if vstream is None:
                     vstream = s
-    
+
     if vstream is None:
         vstream = next((s for s in streams if s.get("codec_type") == "video"), {})
-    
+
     width = int(vstream.get("width") or 0)
     height = int(vstream.get("height") or 0)
     codec = (vstream.get("codec_name") or "unknown").upper()
     duration = float(data.get("format", {}).get("duration") or vstream.get("duration") or 0.0)
-    
+    # 文件大小，单位：MB（整数）
+    file_size_mb = int(os.path.getsize(path) / (1024 * 1024))
+
     return {
         "codec": codec,
         "width": width,
         "height": height,
         "duration": duration,
         "cover_stream_index": cover_index,
+        "file_size": file_size_mb,  # MB
     }
-
-def resolution_label(height: int) -> str:
-    if height >= 2160:
-        return "4K"
-    if height >= 1440:
-        return "2K"
-    if height >= 1080:
-        return "FHD"
-    if height >= 720:
-        return "HD"
-    if height >= 480:
-        return "SD"
-    if height >= 360:
-        return "LD"
-    return f"{height}P" if height else "Unknown"
 ```
 
 - [ ] **步骤 5：运行测试验证通过**
@@ -570,160 +576,41 @@ def resolution_label(height: int) -> str:
 pytest tests/test_probe.py -v
 ```
 
-预期：通过（两个测试）
+预期：通过（一个测试）
 
 - [ ] **步骤 6：提交**
 
 ```bash
-git add backend/app/probe.py backend/tests/test_probe.py backend/tests/conftest.py
+git add backend/app/services/probe.py backend/tests/test_probe.py backend/tests/conftest.py
 git commit -m "feat(probe): add ffprobe wrapper with cover detection"
 ```
 
-### 任务 6：描述文件模块（TDD）
+### 任务 6：缩略图生成模块（TDD）
 
 **文件：**
-- 创建：`backend/app/descfile.py`、`backend/tests/test_descfile.py`
+- 创建：`backend/app/services/thumbgen.py`、`backend/tests/test_thumbgen.py`
 
-- [ ] **步骤 1：编写失败的写入/读取往返测试**
+> **注意：** 缩略图生成仅做原始帧提取，不做任何服务端尺寸/比例处理。前端使用 CSS `object-fit: contain` 做显示适配。
 
-写入 `backend/tests/test_descfile.py`：
-```python
-from app.descfile import write_desc, read_desc
-
-def test_write_read_roundtrip(tmp_path):
-    desc_path = tmp_path / "test.desc"
-    desc = {
-        "file_name": "test.mp4",
-        "codec": "H264",
-        "duration": 123.4,
-        "width": 1920,
-        "height": 1080,
-        "resolution_label": "FHD",
-    }
-    small_thumb = b"fake_jpeg_data_small"
-    full_thumb = b"fake_jpeg_data_full"
-    
-    write_desc(str(desc_path), desc, small_thumb, full_thumb)
-    
-    loaded_desc, loaded_small, loaded_full = read_desc(str(desc_path))
-    assert loaded_desc == desc
-    assert loaded_small == small_thumb
-    assert loaded_full == full_thumb
-```
-
-- [ ] **步骤 2：运行测试验证失败**
-
-```bash
-pytest tests/test_descfile.py -v
-```
-
-预期：失败，报错 "ModuleNotFoundError"
-
-- [ ] **步骤 3：编写实现**
-
-写入 `backend/app/descfile.py`：
-```python
-import struct
-import json
-
-MAGIC = b"VDC2"
-VERSION = 2
-# 4s + 7*I + 4s = 4 + 28 + 4 = 36 字节
-HEADER = struct.Struct("<4sIIIIII4s")
-
-def write_desc(path: str, desc: dict, small_thumb: bytes, full_thumb: bytes):
-    desc_bytes = json.dumps(desc, ensure_ascii=False).encode("utf-8")
-    desc_offset = 36
-    small_offset = desc_offset + len(desc_bytes)
-    full_offset = small_offset + len(small_thumb)
-    header = HEADER.pack(
-        MAGIC, VERSION, desc_offset, len(desc_bytes),
-        small_offset, len(small_thumb), full_offset, len(full_thumb),
-        b""
-    )
-    with open(path, "wb") as f:
-        f.write(header)
-        f.write(desc_bytes)
-        f.write(small_thumb)
-        f.write(full_thumb)
-
-def read_desc(path: str):
-    with open(path, "rb") as f:
-        head = f.read(36)
-        magic, version, doff, dlen, soff, slen, foff, flen, _ = HEADER.unpack(head)
-        if magic != MAGIC:
-            raise ValueError("bad magic")
-        f.seek(doff)
-        desc = json.loads(f.read(dlen))
-        f.seek(soff)
-        small_thumb = f.read(slen)
-        f.seek(foff)
-        full_thumb = f.read(flen)
-    return desc, small_thumb, full_thumb
-```
-
-- [ ] **步骤 4：运行测试验证通过**
-
-```bash
-pytest tests/test_descfile.py -v
-```
-
-预期：通过
-
-- [ ] **步骤 5：编写错误魔数测试**
-
-追加到 `backend/tests/test_descfile.py`：
-```python
-def test_bad_magic(tmp_path):
-    bad_path = tmp_path / "bad.desc"
-    with open(bad_path, "wb") as f:
-        f.write(b"BADM" + b"\x00" * 32)
-    
-    try:
-        read_desc(str(bad_path))
-        assert False, "应该抛出 ValueError"
-    except ValueError as e:
-        assert "bad magic" in str(e)
-```
-
-- [ ] **步骤 6：运行测试**
-
-```bash
-pytest tests/test_descfile.py::test_bad_magic -v
-```
-
-预期：通过
-
-- [ ] **步骤 7：提交**
-
-```bash
-git add backend/app/descfile.py backend/tests/test_descfile.py
-git commit -m "feat(descfile): add binary descriptor with dual thumbnails (small + full)"
-```
-
-### 任务 7：缩略图生成模块（TDD）
-
-**文件：**
-- 创建：`backend/app/thumbgen.py`、`backend/tests/test_thumbgen.py`
-
-- [ ] **步骤 1：编写失败的 fit_to_16_9 测试**
+- [ ] **步骤 1：编写失败的 extract_frame 测试**
 
 写入 `backend/tests/test_thumbgen.py`：
 ```python
-from PIL import Image
-from app.thumbgen import fit_to_16_9
+from app.services.probe import probe_video
+from app.services.thumbgen import extract_frame, extract_frame_from_probe
 
-def test_fit_to_16_9_square():
-    img = Image.new("RGB", (100, 100), (255, 0, 0))
-    result = fit_to_16_9(img, 480)
-    assert result.size == (480, 270)
-    # 检查宽高比是 16:9
-    assert abs(result.size[0] / result.size[1] - 16/9) < 0.01
+def test_extract_frame_returns_jpeg(sample_video):
+    """Verify extract_frame_from_probe returns valid JPEG bytes."""
+    probe = probe_video(sample_video)
+    result = extract_frame_from_probe(sample_video, probe)
+    assert result is not None
+    # JPEG magic bytes: FF D8 FF
+    assert result[:3] == b"\xff\xd8\xff"
 
-def test_fit_to_16_9_wide():
-    img = Image.new("RGB", (1920, 1080), (0, 255, 0))
-    result = fit_to_16_9(img, 480)
-    assert result.size == (480, 270)
+def test_extract_frame_returns_none_for_nonexistent():
+    """Verify extract_frame returns None for a non-existent file."""
+    result = extract_frame("/tmp/nonexistent_video_12345.mp4")
+    assert result is None
 ```
 
 - [ ] **步骤 2：运行测试验证失败**
@@ -736,93 +623,100 @@ pytest tests/test_thumbgen.py -v
 
 - [ ] **步骤 3：编写实现**
 
-写入 `backend/app/thumbgen.py`：
+写入 `backend/app/services/thumbgen.py`：
 ```python
+"""Raw frame extraction from video files using ffmpeg.
+
+Extracts a single frame at original resolution with no resizing or
+aspect-ratio adjustment. Output format is JPEG.
+"""
+
 import io
 import subprocess
+
 from PIL import Image
+
 from .probe import probe_video
 
-TARGET_SMALL_W = 480
 SEEK_TIME = 210.0  # 3:30
 
-# 占位图：1x1 黑色像素
-PLACEHOLDER_SMALL = None  # 延迟生成
-PLACEHOLDER_FULL = None
+# 小缩略图目标宽度（卡片用），等比缩放，JPEG 压缩
+SMALL_WIDTH = 480
+SMALL_JPEG_QUALITY = 85
 
-def _get_placeholder(w, h):
-    img = Image.new("RGB", (w, h), (0, 0, 0))
-    buf = io.BytesIO()
-    img.save(buf, format="JPEG", quality=85)
-    return buf.getvalue()
 
-def fit_to_16_9(img: Image.Image, target_w: int) -> bytes:
-    target_h = round(target_w * 9 / 16)
-    img = img.convert("RGB")
-    src_w, src_h = img.size
-    scale = min(target_w / src_w, target_h / src_h)
-    new_w, new_h = max(1, round(src_w * scale)), max(1, round(src_h * scale))
-    resized = img.resize((new_w, new_h), Image.LANCZOS)
-    canvas = Image.new("RGB", (target_w, target_h), (0, 0, 0))
-    canvas.paste(resized, ((target_w - new_w) // 2, (target_h - new_h) // 2))
-    buf = io.BytesIO()
-    canvas.save(buf, format="JPEG", quality=85)
-    return buf.getvalue()
+def _extract_frame(path: str, probe: dict) -> bytes | None:
+    """Run ffmpeg to extract a single frame, returning raw JPEG bytes.
 
-def _extract_frame(path: str, probe: dict) -> Image.Image | None:
-    if probe["cover_stream_index"] is not None:
+    Prioritises embedded cover streams, then SEEK_TIME seek,
+    then video midpoint for short clips.
+    """
+    if probe.get("cover_stream_index") is not None:
         idx = probe["cover_stream_index"]
         cmd = [
             "ffmpeg", "-v", "error",
+            "-i", str(path),
             "-map", f"0:{idx}",
             "-frames:v", "1",
-            "-f", "image2pipe", "-vcodec", "png", "-"
+            "-f", "image2pipe", "-vcodec", "mjpeg", "-",
         ]
     else:
-        dur = probe["duration"]
+        dur = probe.get("duration", 0.0)
         t = SEEK_TIME if dur > SEEK_TIME else (dur / 2 if dur > 0 else 0.0)
         cmd = [
             "ffmpeg", "-v", "error",
             "-ss", f"{t:.2f}",
             "-i", str(path),
             "-frames:v", "1",
-            "-f", "image2pipe", "-vcodec", "png", "-"
+            "-f", "image2pipe", "-vcodec", "mjpeg", "-",
         ]
-    
-    out = subprocess.run(cmd, capture_output=True, timeout=120)
-    if out.returncode != 0 or not out.stdout:
-        return None  # 抽帧失败
-    
-    return Image.open(io.BytesIO(out.stdout))
 
-def generate_thumbnails(path: str):
-    """生成小图和高清图，都返回 bytes。失败时返回占位图。"""
-    probe = probe_video(path)
-    img = _extract_frame(path, probe)
-    
-    # 小图
-    if img is not None:
-        small_bytes = fit_to_16_9(img, TARGET_SMALL_W)
-    else:
-        small_bytes = _get_placeholder(TARGET_SMALL_W, round(TARGET_SMALL_W * 9 / 16))
-    
-    # 高清图
-    if img is not None:
-        target_w = min(probe["width"], img.size[0])
-        full_bytes = fit_to_16_9(img, target_w)
-    else:
-        # 使用视频宽度作为高清图宽度，若无则默认 1920
-        full_w = probe["width"] if probe["width"] > 0 else 1920
-        full_bytes = _get_placeholder(full_w, round(full_w * 9 / 16))
-    
-    meta = {
-        "codec": probe["codec"],
-        "duration": probe["duration"],
-        "width": probe["width"],
-        "height": probe["height"],
-        "resolution_label": None,  # 调用者填充
-    }
-    return meta, small_bytes, full_bytes
+    try:
+        out = subprocess.run(cmd, capture_output=True, timeout=120)
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return None
+
+    if out.returncode != 0 or not out.stdout:
+        return None
+    return out.stdout
+
+
+def extract_frame(path: str) -> bytes | None:
+    """Extract a single raw JPEG frame from *path*.
+
+    Probes the video internally to determine cover-stream vs seek strategy.
+    Returns ``None`` when ffprobe or ffmpeg fails.
+    """
+    try:
+        probe = probe_video(path)
+    except Exception:
+        return None
+    return _extract_frame(path, probe)
+
+
+def extract_frame_from_probe(path: str, probe: dict) -> bytes | None:
+    """Extract a single raw JPEG frame using pre-computed *probe* data.
+
+    *probe* must contain ``cover_stream_index`` (int | None) and
+    ``duration`` (float).  Returns ``None`` when ffmpeg fails.
+    """
+    return _extract_frame(path, probe)
+
+
+def make_small_jpeg(jpeg_bytes: bytes, target_width: int = SMALL_WIDTH) -> bytes:
+    """将原始 JPEG 帧等比缩小为更小的 JPEG（卡片预览用）。
+
+    仅缩放尺寸 + 重新压缩，不改变宽高比、不加黑边。
+    """
+    img = Image.open(io.BytesIO(jpeg_bytes))
+    if img.width > target_width:
+        ratio = target_width / img.width
+        new_size = (target_width, max(1, round(img.height * ratio)))
+        img = img.resize(new_size, Image.LANCZOS)
+    img = img.convert("RGB")
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=SMALL_JPEG_QUALITY)
+    return buf.getvalue()
 ```
 
 - [ ] **步骤 4：运行测试验证通过**
@@ -836,7 +730,7 @@ pytest tests/test_thumbgen.py -v
 - [ ] **步骤 5：提交**
 
 ```bash
-git add backend/app/thumbgen.py backend/tests/test_thumbgen.py
+git add backend/app/services/thumbgen.py backend/tests/test_thumbgen.py
 git commit -m "feat(thumbgen): add dual thumbnail generation with fallback to placeholder"
 ```
 
@@ -853,7 +747,7 @@ git commit -m "feat(thumbgen): add dual thumbnail generation with fallback to pl
 ### 任务 8：扫描器服务（TDD）
 
 **文件：**
-- 创建：`backend/app/scanner.py`、`backend/tests/test_scanner.py`
+- 创建：`backend/app/services/scanner.py`、`backend/tests/test_scanner.py`
 
 - [ ] **步骤 1：编写失败的扫描编排测试**
 
@@ -862,7 +756,7 @@ git commit -m "feat(thumbgen): add dual thumbnail generation with fallback to pl
 import pytest
 from pathlib import Path
 import subprocess
-from app.scanner import Scanner, find_root
+from app.services.scanner import Scanner, find_root
 from app import config
 
 @pytest.fixture
@@ -895,16 +789,16 @@ def test_find_root(video_dir, monkeypatch):
     assert root == Path(video_dir).resolve()
 
 def test_scanner_ensures_scan(video_dir, monkeypatch):
-    cache_dir = Path(video_dir).parent / "cache"
     monkeypatch.setenv("DATA_PATH", str(Path(video_dir).parent))
     cfg = config.AppConfig(video_path_list=[video_dir], page_size=0, column_size=4)
     monkeypatch.setattr(config, "load_config", lambda: cfg)
-    
+
     scanner = Scanner()
     l2_path = str(Path(video_dir) / "movies" / "action")
-    groups, scanning = scanner.ensure_scan(l2_path)
+    groups, scanning, progress = scanner.ensure_scan(l2_path)
     assert len(groups) > 0
     assert scanning == False  # 小目录扫描快速完成
+    assert progress["total"] >= 1
 ```
 
 - [ ] **步骤 2：运行测试验证失败**
@@ -917,17 +811,62 @@ pytest tests/test_scanner.py -v
 
 - [ ] **步骤 3：编写实现**
 
-写入 `backend/app/scanner.py`：
+写入 `backend/app/services/scanner.py`：
 ```python
 import os
 import threading
 import time
+from collections import OrderedDict
 from pathlib import Path
-from queue import Queue, Empty
-from . import config, probe, descfile, thumbgen, path_id
-from .probe import resolution_label
+from . import probe, cache_index, thumbgen
+from .. import config, path_id
 
 VIDEO_EXTS = {".mp4", ".mkv", ".mov", ".avi", ".m4v", ".flv", ".webm", ".wmv", ".ts", ".mpg", ".mpeg", ".3gp", ".rm", ".rmvb"}
+
+# 最多缓存的 L2 目录状态数（LRU 淘汰），避免无限内存增长
+MAX_CACHED_L2_DIRS = 20
+
+
+def _resolution_label(height: int) -> str:
+    """根据视频高度计算分辨率标签（4K/2K/FHD/HD/SD/LD）。
+
+    从 probe.py 移出，由 scanner 在写入缓存时本地计算。
+    前端也可独立计算（参见 VideoCard.vue formatResolution）。
+    """
+    if height >= 2160:
+        return "4K"
+    if height >= 1440:
+        return "2K"
+    if height >= 1080:
+        return "FHD"
+    if height >= 720:
+        return "HD"
+    if height >= 480:
+        return "SD"
+    if height >= 360:
+        return "LD"
+    return f"{height}P" if height else "Unknown"
+
+
+def _parse_filename(file_name: str, rules: list[dict]) -> dict | None:
+    """对文件名应用解析规则，匹配成功返回 ext 字典（无 meta 嵌套）。"""
+    import re
+    if not rules:
+        return None
+    for rule in rules:
+        pattern = rule.get("pattern", "")
+        if not pattern:
+            continue
+        try:
+            m = re.match(pattern, file_name)
+            if m:
+                ext = {k: v for k, v in m.groupdict().items() if v is not None}
+                if ext:
+                    return ext
+        except re.error:
+            continue
+    return None
+
 
 def find_root(video_path: str, roots: list[str]) -> Path | None:
     p = Path(video_path).resolve()
@@ -942,123 +881,189 @@ def find_root(video_path: str, roots: list[str]) -> Path | None:
             continue
     return best
 
+
+def _build_cache_entry(video_path: Path, item: dict, level: int,
+                        thumb_file: str | None = None) -> dict:
+    """构建扁平化的 index.yaml 条目。
+
+    item 为扁平结构（无 meta 嵌套），与 API 响应一致。
+    """
+    stat = video_path.stat()
+    entry = {
+        "file_name": video_path.name,
+        "group": item.get("group"),
+        "level": level,
+        "create_time": int(stat.st_ctime),
+        "modify_time": int(stat.st_mtime),
+        # 缓存中 file_size 单位为 MB（整数），读取时再转换为 bytes
+        "file_size": int(stat.st_size / (1024 * 1024)),
+    }
+    # L2+ 元数据字段（直接从 item 读取，不再从 meta 嵌套读取）
+    if level >= 2:
+        entry["codec"] = item.get("codec")
+        entry["width"] = item.get("width")
+        entry["height"] = item.get("height")
+        entry["duration"] = int(item.get("duration", 0) or 0)
+        entry["resolution_label"] = item.get("resolution_label")
+    ext = item.get("ext")
+    if ext:
+        entry["ext"] = ext
+    if thumb_file:
+        entry["thumb_file"] = thumb_file
+    return entry
+
+
+def _merge_metadata(item: dict, probe_result: dict) -> None:
+    """将 probe 结果合并到扁平 item 中（原地修改）。"""
+    item["codec"] = probe_result["codec"]
+    item["width"] = probe_result["width"]
+    item["height"] = probe_result["height"]
+    item["duration"] = probe_result["duration"]
+    item["resolution_label"] = _resolution_label(probe_result["height"])
+
+
 class _L2State:
     def __init__(self):
-        self.lock = threading.Lock()
+        # RLock 作为防御性安全网：正常路径不应依赖可重入性
+        self.lock = threading.RLock()
         self.scanning = False
         self.total = 0
         self.seq = 0
         self.videos = {}  # video_id -> dict
-        self.thread = None
+
 
 class Scanner:
     def __init__(self):
-        self.l2_states = {}
-        self.id_to_path = {}
-        self._lock = threading.Lock()
-    
+        self._l2_states = OrderedDict()  # LRU 有序：最近使用的在末尾
+        self._id_to_path = {}
+        self._lock = threading.Lock()  # 保护 _l2_states 和 _id_to_path
+
     def _get_l2_state(self, l2_path: str) -> _L2State:
         with self._lock:
-            if l2_path not in self.l2_states:
-                self.l2_states[l2_path] = _L2State()
-            return self.l2_states[l2_path]
-    
+            state = self._l2_states.get(l2_path)
+            if state is None:
+                state = _L2State()
+                self._l2_states[l2_path] = state
+            else:
+                self._l2_states.move_to_end(l2_path)
+            state.last_used = time.time()
+            # LRU 淘汰：超过上限时驱逐最久未用的、且未在扫描中的状态
+            while len(self._l2_states) > MAX_CACHED_L2_DIRS:
+                old_path, old_state = next(iter(self._l2_states.items()))
+                if old_state.scanning:
+                    break
+                self._l2_states.pop(old_path)
+            return state
+
     def ensure_scan(self, l2_path: str):
         state = self._get_l2_state(l2_path)
         with state.lock:
-            if state.scanning:
-                return self._build_groups(state), True
-            
-            state.scanning = True
-            state.thread = threading.Thread(target=self._scan_worker, args=(l2_path, state), daemon=True)
-            state.thread.start()
-        
-        # 短暂等待快速扫描
-        time.sleep(0.5)
-        return self._build_groups(state), state.scanning
-    
+            already_scanning = state.scanning
+            if not already_scanning:
+                state.scanning = True
+                t = threading.Thread(
+                    target=self._scan_worker, args=(l2_path, state), daemon=True
+                )
+                t.start()
+        if not already_scanning:
+            time.sleep(0.5)  # 新启动的扫描，短暂等待快速阶段填充数据
+        return self._build_groups(state), state.scanning, self._build_progress(state)
+
     def _scan_worker(self, l2_path: str, state: _L2State):
         try:
             cfg = config.load_config()
-            l2 = Path(l2_path)
-            
-            # 收集视频
-            videos = []
-            for root, dirs, files in os.walk(l2_path):
+            root = find_root(l2_path, cfg.video_path_list)
+
+            video_paths = []
+            for root_dir, dirs, files in os.walk(l2_path):
                 for f in files:
                     if Path(f).suffix.lower() in VIDEO_EXTS:
-                        videos.append(Path(root) / f)
-            
+                        video_paths.append(Path(root_dir) / f)
+
             with state.lock:
-                state.total = len(videos)
-            
-            for video_path in videos:
+                state.total = len(video_paths)
+
+            # Phase L1 — 文件系统扫描，扁平条目 + 文件名解析规则
+            for video_path in video_paths:
                 vid = path_id.path_id(str(video_path))
-                self.id_to_path[vid] = str(video_path)
-                
-                # 检查缓存
-                cache_path = self._cache_desc_path(str(video_path), cfg)
-                source_mtime = video_path.stat().st_mtime
-                
-                if cache_path.exists() and cache_path.stat().st_mtime >= source_mtime:
-                    # 缓存有效
-                    try:
-                        desc, _ = descfile.read_desc(str(cache_path))
-                        meta = desc
-                        meta["resolution_label"] = resolution_label(meta["height"])
-                    except:
-                        meta = None
-                    
+                file_size = int(video_path.stat().st_size / (1024 * 1024))  # bytes → MB
+                file_mtime = int(video_path.stat().st_mtime)
+                item = {
+                    "video_id": vid,
+                    "file_name": video_path.name,
+                    "file_size": file_size,  # MB
+                    "modify_time": file_mtime,
+                    "group": self._group_name(str(video_path), l2_path),
+                    "level": 1,
+                }
+                ext_data = _parse_filename(video_path.name, cfg.parse_rules)
+                if ext_data:
+                    item["ext"] = ext_data
+                # L1 阶段即把最小条目落盘到 index.yaml
+                if root:
+                    index_path, _ = cache_index.video_cache_path(str(root), str(video_path))
+                    cache_index.update_video_in_index(
+                        index_path, _build_cache_entry(video_path, item, level=1)
+                    )
+                with state.lock:
+                    state.seq += 1
+                    item["seq"] = state.seq
+                    state.videos[vid] = item
+
+            # Phase L2 — ffprobe 元数据
+            for video_path in video_paths:
+                vid = path_id.path_id(str(video_path))
+                with state.lock:
+                    if state.videos.get(vid, {}).get("level", 1) >= 2:
+                        continue
+                try:
+                    probe_result = probe.probe_video(str(video_path))
+                except Exception:
+                    probe_result = None
+                with state.lock:
+                    if vid in state.videos and probe_result is not None:
+                        _merge_metadata(state.videos[vid], probe_result)
+                        state.videos[vid]["level"] = 2
+                        state.videos[vid]["_probe"] = probe_result
+                if root and probe_result is not None:
+                    index_path, _ = cache_index.video_cache_path(str(root), str(video_path))
                     with state.lock:
-                        state.videos[vid] = {
-                            "video_id": vid,
-                            "file_name": video_path.name,
-                            "file_size": video_path.stat().st_size,
-                            "group": self._group_name(str(video_path), l2_path),
-                            "ready": meta is not None,
-                            "meta": meta,
-                        }
-                else:
-                    # 生成
-                    try:
-                        meta, small_bytes, full_bytes = thumbgen.generate_thumbnails(str(video_path))
-                        meta["resolution_label"] = resolution_label(meta["height"])
-                        
-                        descfile.write_desc(str(cache_path), meta, small_bytes, full_bytes)
-                        
-                        item = {
-                            "video_id": vid,
-                            "file_name": video_path.name,
-                            "file_size": video_path.stat().st_size,
-                            "group": self._group_name(str(video_path), l2_path),
-                            "ready": True,
-                            "meta": meta,
-                        }
-                    except Exception:
-                        item = {
-                            "video_id": vid,
-                            "file_name": video_path.name,
-                            "file_size": video_path.stat().st_size,
-                            "group": self._group_name(str(video_path), l2_path),
-                            "ready": False,
-                            "meta": None,
-                        }
-                    
-                    with state.lock:
-                        state.videos[vid] = item
-                        state.seq += 1
-        
+                        item_snapshot = dict(state.videos.get(vid, {}))
+                    item_snapshot["group"] = self._group_name(str(video_path), l2_path)
+                    cache_index.update_video_in_index(
+                        index_path, _build_cache_entry(video_path, item_snapshot, level=2)
+                    )
+
+            # Phase L3 — 缩略图提取（原始 JPEG 帧）
+            for video_path in video_paths:
+                vid = path_id.path_id(str(video_path))
+                with state.lock:
+                    entry = state.videos.get(vid)
+                    probe_result = entry.get("_probe") if entry else None
+                if probe_result is None:
+                    continue
+                try:
+                    png_bytes = thumbgen.extract_frame_from_probe(str(video_path), probe_result)
+                except Exception:
+                    png_bytes = None
+                if not png_bytes or not root:
+                    continue
+                index_path, thumb_path = cache_index.video_cache_path(str(root), str(video_path))
+                thumb_path.write_bytes(png_bytes)
+                with state.lock:
+                    if vid in state.videos:
+                        state.videos[vid]["level"] = 3
+                        state.videos[vid].pop("_probe", None)
+                        entry_snapshot = dict(state.videos[vid])
+                if entry_snapshot:
+                    cache_index.update_video_in_index(
+                        index_path,
+                        _build_cache_entry(video_path, entry_snapshot, level=3, thumb_file=thumb_path.name)
+                    )
         finally:
             with state.lock:
                 state.scanning = False
-    
-    def _cache_desc_path(self, video_path: str, cfg: config.AppConfig) -> Path:
-        root = find_root(video_path, cfg.video_path_list)
-        if root is None:
-            raise ValueError(f"未找到 {video_path} 的根目录")
-        rel = Path(video_path).resolve().relative_to(root)
-        return config.data_path() / "cache" / rel
-    
+
     def _group_name(self, video_path: str, l2_path: str) -> str:
         v = Path(video_path).resolve()
         l2 = Path(l2_path).resolve()
@@ -1069,7 +1074,7 @@ class Scanner:
             return str(parent.relative_to(l2)).replace("\\", "/")
         except ValueError:
             return "未分组"
-    
+
     def _build_groups(self, state: _L2State):
         with state.lock:
             groups_dict = {}
@@ -1077,43 +1082,90 @@ class Scanner:
                 g = item["group"]
                 if g not in groups_dict:
                     groups_dict[g] = []
-                groups_dict[g].append(item)
+                # 浅拷贝，避免返回带 _probe 的临时字段
+                clean = {k: v for k, v in item.items() if k != "_probe"}
+                groups_dict[g].append(clean)
         return [{"name": k, "videos": v} for k, v in groups_dict.items()]
-    
+
+    def _build_progress(self, state: _L2State):
+        with state.lock:
+            level1 = level2 = level3 = 0
+            for item in state.videos.values():
+                lv = item.get("level", 1)
+                if lv == 1:
+                    level1 += 1
+                elif lv == 2:
+                    level2 += 1
+                elif lv == 3:
+                    level3 += 1
+            return {"total": state.total, "level1": level1, "level2": level2, "level3": level3}
+
     def status(self, l2_path: str, since: int = 0):
         state = self._get_l2_state(l2_path)
         with state.lock:
             updates = []
             for vid, item in state.videos.items():
-                if item["ready"] and item["meta"] is not None:
-                    updates.append({
-                        "seq": state.seq,
+                if item.get("seq", -1) > since:
+                    # 扁平更新条目：基础字段 + 可选元数据字段（无 meta 嵌套）
+                    entry = {
+                        "seq": item["seq"],
                         "video_id": vid,
                         "file_name": item["file_name"],
                         "file_size": item["file_size"],
                         "group": item["group"],
-                        "meta": item["meta"],
-                    })
-            return {
-                "scanning": state.scanning,
-                "total": state.total,
-                "ready": sum(1 for v in state.videos.values() if v["ready"]),
-                "last_seq": state.seq,
-                "updates": updates,
-            }
-    
-    def get_thumb(self, video_id: str, full: bool = False):
-        if video_id not in self.id_to_path:
+                        "level": item.get("level", 1),
+                    }
+                    if item.get("modify_time") is not None:
+                        entry["modify_time"] = item["modify_time"]
+                    if item.get("ext") is not None:
+                        entry["ext"] = item["ext"]
+                    if item.get("level", 1) >= 2 and item.get("codec"):
+                        entry["codec"] = item["codec"]
+                        entry["width"] = item["width"]
+                        entry["height"] = item["height"]
+                        entry["duration"] = item["duration"]
+                        entry["resolution_label"] = item.get("resolution_label")
+                    updates.append(entry)
+            updates.sort(key=lambda u: u["seq"])
+            progress = self._build_progress(state)
+            scanning = state.scanning
+            total = state.total
+            ready = sum(1 for v in state.videos.values() if v.get("level", 1) >= 2)
+            last_seq = state.seq
+        return {
+            "scanning": scanning,
+            "total": total,
+            "ready": ready,
+            "last_seq": last_seq,
+            "progress": progress,
+            "updates": updates,
+        }
+
+    def get_thumb(self, video_id: str, small: bool = False):
+        """返回缩略图字节。
+
+        small=True 返回压缩后的小 JPEG（卡片用，懒生成 .small.jpg）；
+        small=False 返回原始 JPEG（浮层用）。
+        """
+        with self._lock:
+            video_path = self._id_to_path.get(video_id)
+        if video_path is None:
             return None
-        video_path = self.id_to_path[video_id]
-        cache_path = self._cache_desc_path(video_path, config.load_config())
-        if not cache_path.exists():
+        cfg = config.load_config()
+        root = find_root(video_path, cfg.video_path_list)
+        if root is None:
             return None
-        try:
-            desc, small_thumb, full_thumb = descfile.read_desc(str(cache_path))
-            return full_thumb if full else small_thumb
-        except:
+        index_path, _ = cache_index.video_cache_path(str(root), video_path)
+        full_path = cache_index.get_thumb_path(index_path, Path(video_path).name)
+        if full_path is None:
             return None
+        if small:
+            small_path = full_path.with_suffix(".small.jpg")
+            if not small_path.exists() or small_path.stat().st_mtime < full_path.stat().st_mtime:
+                small_bytes = thumbgen.make_small_jpeg(full_path.read_bytes())
+                small_path.write_bytes(small_bytes)
+            return ("image/jpeg", small_path.read_bytes())
+        return ("image/jpeg", full_path.read_bytes())
 ```
 
 - [ ] **步骤 4：运行测试验证通过**
@@ -1127,7 +1179,7 @@ pytest tests/test_scanner.py -v
 - [ ] **步骤 5：提交**
 
 ```bash
-git add backend/app/scanner.py backend/tests/test_scanner.py
+git add backend/app/services/scanner.py backend/tests/test_scanner.py
 git commit -m "feat(scanner): add progressive scan orchestration with caching"
 ```
 
@@ -1146,20 +1198,27 @@ git commit -m "feat(scanner): add progressive scan orchestration with caching"
 ```python
 from pydantic import BaseModel
 
-class VideoMeta(BaseModel):
-    codec: str
-    duration: float
-    width: int
-    height: int
-    resolution_label: str
 
 class VideoItem(BaseModel):
+    """视频条目（扁平结构，与 index.yaml 一致）。
+
+    L1：仅有 file_name/file_size/group/level=1
+    L2：附加 codec/width/height/duration/resolution_label
+    L3：附加缩略图（thumb_file 仅在缓存中）
+    """
     video_id: str
     file_name: str
-    file_size: int
+    file_size: int  # 单位：MB（整数）
     group: str
-    ready: bool
-    meta: VideoMeta | None = None
+    level: int = 1  # 1=filename, 2=+metadata, 3=+thumbnail
+    modify_time: int | None = None  # 源文件修改时间（epoch 秒）
+    ext: dict | None = None  # 文件名解析扩展信息（code/actress/title 等）
+    # L2+ 元数据字段（level>=2 时存在）
+    codec: str | None = None
+    width: int | None = None
+    height: int | None = None
+    duration: float | None = None
+    resolution_label: str | None = None  # e.g. "4K", "FHD"
 
 class Group(BaseModel):
     name: str
@@ -1168,20 +1227,30 @@ class Group(BaseModel):
 class VideosResponse(BaseModel):
     groups: list[Group]
     scanning: bool
+    progress: dict = {}  # {"total": N, "level1": N, "level2": N, "level3": N}
 
 class ScanUpdate(BaseModel):
+    """扫描增量更新条目（扁平结构）。"""
     seq: int
     video_id: str
     file_name: str
-    file_size: int
+    file_size: int  # 单位：MB（整数）
     group: str
-    meta: VideoMeta
+    level: int
+    modify_time: int | None = None
+    ext: dict | None = None
+    codec: str | None = None
+    width: int | None = None
+    height: int | None = None
+    duration: float | None = None
+    resolution_label: str | None = None
 
 class ScanStatus(BaseModel):
     scanning: bool
     total: int
     ready: int
     last_seq: int
+    progress: dict = {}
     updates: list[ScanUpdate]
 
 class ConfigModel(BaseModel):
@@ -1298,45 +1367,56 @@ def list_l2(root_id: str):
 写入 `backend/app/routes/videos.py`：
 ```python
 from fastapi import APIRouter, HTTPException, Response
-from fastapi.responses import StreamingResponse
-import io
-from ..scanner import Scanner
+from pathlib import Path
+from .. import config, path_id
+from ..services.scanner import Scanner
 
 router = APIRouter()
 scanner = Scanner()
 
 @router.get("/l2/{l2_id}/videos")
 def get_videos(l2_id: str):
-    from ..path_id import path_id
-    from pathlib import Path
-    
-    # 通过 id 查找 l2 路径
-    from .. import config
+    """Get all video filenames under L2 directory (L1 - instant filesystem scan).
+    Triggers background processing for metadata and thumbnails."""
+
+    l2_path = _find_l2_path(l2_id)
+    if l2_path is None:
+        raise HTTPException(404, "l2 directory not found")
+
+    groups, scanning, progress = scanner.ensure_scan(l2_path)
+    return {"groups": groups, "scanning": scanning, "progress": progress}
+
+
+@router.get("/thumb/{video_id}")
+def get_thumb(video_id: str, size: str = "full"):
+    """获取缩略图。size=small 返回压缩小图（卡片用），默认 full 返回原始 JPEG（浮层用）。
+    未就绪返回 202。"""
+    small = size == "small"
+    result = scanner.get_thumb(video_id, small=small)
+    if result is None:
+        return Response(status_code=202, content="thumbnail not ready")
+    media_type, thumb_bytes = result
+    return Response(
+        content=thumb_bytes,
+        media_type=media_type,
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+
+def _find_l2_path(l2_id: str) -> str | None:
+    """Helper: resolve l2_id to absolute path."""
     cfg = config.load_config()
-    l2_path = None
     for root_p in cfg.video_path_list:
         root = Path(root_p).resolve()
         if not root.exists():
             continue
-        for item in root.iterdir():
-            if item.is_dir() and path_id(str(item)) == l2_id:
-                l2_path = str(item)
-                break
-        if l2_path:
-            break
-    
-    if l2_path is None:
-        raise HTTPException(404, "未找到 l2 目录")
-    
-    groups, scanning = scanner.ensure_scan(l2_path)
-    return {"groups": groups, "scanning": scanning}
-
-@router.get("/thumb/{video_id}")
-def get_thumb(video_id: str, full: int = 0):
-    thumb = scanner.get_thumb(video_id, full=full == 1)
-    if thumb is None:
-        return Response(status_code=202, content="缩略图未就绪")
-    return Response(content=thumb, media_type="image/jpeg")
+        for l1_item in root.iterdir():
+            if not l1_item.is_dir():
+                continue
+            for l2_item in l1_item.iterdir():
+                if l2_item.is_dir() and path_id.path_id(str(l2_item)) == l2_id:
+                    return str(l2_item)
+    return None
 ```
 
 - [ ] **步骤 5：编写扫描路由**
@@ -1766,16 +1846,17 @@ import axios from 'axios'
 interface VideoItem {
   video_id: string
   file_name: string
-  file_size: number
+  file_size: number  // 单位：MB（整数）
   group: string
-  ready: boolean
-  meta: {
-    codec: string
-    duration: number
-    width: number
-    height: number
-    resolution_label: string
-  } | null
+  level: number  // 1=filename, 2=+metadata, 3=+thumbnail
+  modify_time?: number  // 源文件修改时间（epoch 秒）
+  ext?: Record<string, string>  // 文件名解析扩展信息（code/actress/title 等）
+  // L2+ 元数据字段
+  codec?: string
+  width?: number
+  height?: number
+  duration?: number
+  resolution_label?: string  // e.g. "4K", "FHD"
 }
 
 interface Group {
@@ -1783,14 +1864,24 @@ interface Group {
   videos: VideoItem[]
 }
 
+interface ProgressInfo {
+  total: number
+  level1: number
+  level2: number
+  level3: number
+}
+
 export const useBrowserStore = defineStore('browser', {
   state: () => ({
     roots: [] as { id: string; name: string; path: string }[],
     selectedRootId: null as string | null,
+    l1Dirs: [] as { id: string; name: string; path: string }[],
+    selectedL1Id: null as string | null,
     l2Dirs: [] as { id: string; name: string; path: string }[],
     selectedL2Id: null as string | null,
     groups: [] as Group[],
     scanning: false,
+    progress: { total: 0, level1: 0, level2: 0, level3: 0 } as ProgressInfo,
   }),
   actions: {
     async fetchRoots() {
@@ -1799,9 +1890,17 @@ export const useBrowserStore = defineStore('browser', {
     },
     async selectRoot(rootId: string) {
       this.selectedRootId = rootId
+      this.selectedL1Id = null
       this.selectedL2Id = null
       this.groups = []
-      const { data } = await axios.get(`/api/roots/${rootId}/l2`)
+      const { data } = await axios.get(`/api/roots/${rootId}/l1`)
+      this.l1Dirs = data
+    },
+    async selectL1(l1Id: string) {
+      this.selectedL1Id = l1Id
+      this.selectedL2Id = null
+      this.groups = []
+      const { data } = await axios.get(`/api/l1/${l1Id}/l2`)
       this.l2Dirs = data
     },
     async selectL2(l2Id: string) {
@@ -1809,19 +1908,28 @@ export const useBrowserStore = defineStore('browser', {
       const { data } = await axios.get(`/api/l2/${l2Id}/videos`)
       this.groups = data.groups
       this.scanning = data.scanning
+      this.progress = data.progress || { total: 0, level1: 0, level2: 0, level3: 0 }
+      // 打开目录触发扫描 → 启动任务浮窗轮询
+      if (this.scanning) {
+        const { useTaskStore } = await import('./task')
+        useTaskStore().notifyScan()
+      }
     },
     async pollStatus() {
       if (!this.selectedL2Id) return
       const { data } = await axios.get(`/api/scan-status?l2_id=${this.selectedL2Id}`)
       this.scanning = data.scanning
-      // 合并更新到分组
+      this.progress = data.progress || { total: 0, level1: 0, level2: 0, level3: 0 }
+      // Merge updates into groups（扁平字段直接合并）
       for (const update of data.updates) {
         for (const group of this.groups) {
           if (group.name === update.group) {
             const existing = group.videos.find(v => v.video_id === update.video_id)
             if (existing) {
-              existing.ready = true
-              existing.meta = update.meta
+              // 合并所有扁平字段
+              Object.assign(existing, update)
+              // 清理 scan 协议字段（不属于 VideoItem）
+              delete (existing as any).seq
             }
             break
           }
@@ -2049,20 +2157,30 @@ defineEmits<{
     class="bg-white dark:bg-gray-800 rounded shadow overflow-hidden cursor-pointer hover:shadow-lg transition-shadow"
     @click="$emit('showLightbox', video)"
   >
-    <div class="relative aspect-video bg-gray-900">
-      <img v-if="video.ready" :src="`/api/thumb/${video.video_id}`" class="w-full h-full object-contain" />
-      <div v-else class="w-full h-full flex items-center justify-center text-gray-500">加载中...</div>
-      
-      <div class="absolute top-2 left-2 bg-black/60 text-white text-xs px-2 py-1 rounded">
-        {{ video.meta?.codec || '-' }}
-      </div>
-      <div class="absolute top-2 right-2 bg-black/60 text-white text-xs px-2 py-1 rounded">
-        {{ video.meta?.resolution_label || '-' }}
-      </div>
-      <div class="absolute bottom-2 left-2 bg-black/60 text-white text-xs px-2 py-1 rounded">
-        {{ formatDuration(video.meta?.duration) }}
-      </div>
-      <div class="absolute bottom-2 right-2 bg-black/60 text-white text-xs px-2 py-1 rounded">
+    <div class="relative aspect-video bg-slate-900 flex items-center justify-center">
+      <img
+        v-if="video.level >= 3"
+        :src="`/api/thumb/${video.video_id}?size=small`"
+        class="w-full h-full object-contain"
+        loading="lazy"
+      />
+      <p
+        v-else
+        class="text-slate-500 dark:text-slate-400 text-sm animate-pulse"
+      >加载中...</p>
+
+      <template v-if="video.level >= 2">
+        <div class="absolute top-2 left-2 bg-black/55 backdrop-blur-sm text-white text-[11px] font-medium px-1.5 py-0.5 rounded-md">
+          {{ video.codec || '-' }}
+        </div>
+        <div class="absolute top-2 right-2 bg-black/55 backdrop-blur-sm text-white text-[11px] font-medium px-1.5 py-0.5 rounded-md">
+          {{ formatResolution(video.height || 0) }}
+        </div>
+        <div class="absolute bottom-2 left-2 bg-black/55 backdrop-blur-sm text-white text-[11px] font-medium px-1.5 py-0.5 rounded-md tabular-nums">
+          {{ formatDuration(video.duration) }}
+        </div>
+      </template>
+      <div class="absolute bottom-2 right-2 bg-black/55 backdrop-blur-sm text-white text-[11px] font-medium px-1.5 py-0.5 rounded-md tabular-nums">
         {{ formatSize(video.file_size) }}
       </div>
     </div>
@@ -2086,8 +2204,19 @@ function formatDuration(sec?: number): string {
   return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
 }
 
-function formatSize(bytes: number): string {
-  const gb = bytes / (1024 ** 3)
+function formatResolution(height: number): string {
+  if (height >= 2160) return '4K'
+  if (height >= 1440) return '2K'
+  if (height >= 1080) return 'FHD'
+  if (height >= 720) return 'HD'
+  if (height >= 480) return 'SD'
+  if (height >= 360) return 'LD'
+  return height ? `${height}P` : '-'
+}
+
+function formatSize(mb: number): string {
+  // MB → GB（保留 1 位小数）
+  const gb = mb / 1024
   return `${gb.toFixed(1)}G`
 }
 </script>

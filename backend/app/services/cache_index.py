@@ -17,7 +17,7 @@ def root_cache_dir(root_path: str) -> Path:
 
 
 def video_cache_path(root_path: str, video_abs_path: str) -> tuple[Path, Path]:
-    """Return ``(index_yaml_path, thumb_png_path)`` for the given video.
+    """Return ``(index_yaml_path, thumb_jpg_path)`` for the given video.
 
     Parent directories are created on demand; the caller can safely write to
     either returned path immediately.
@@ -76,7 +76,7 @@ def remove_video_from_index(index_path: Path, file_name: str) -> None:
 
 
 def get_thumb_path(index_path: Path, file_name: str) -> Optional[Path]:
-    """Return the path to the thumbnail ``.png`` for *file_name*.
+    """Return the path to the thumbnail ``.jpg`` for *file_name*.
 
     Returns ``None`` when the entry or the actual file is not found.
     """

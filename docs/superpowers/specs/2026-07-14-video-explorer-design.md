@@ -420,7 +420,7 @@ backend/
 
 - `Dockerfile`：基于 python slim，装 ffmpeg，装前端构建产物
 - `docker-compose.yaml`：挂载视频目录 + DATA_PATH，映射端口
-- 构建分两阶段：node 阶段构建前端，python 阶段跑后端
+- 构建分两阶段：Bun 阶段构建前端，Python 阶段跑后端
 
 ## 11. 错误处理
 

@@ -1,7 +1,7 @@
 import yaml
 from pathlib import Path
 
-from app.cache_index import (
+from app.services.cache_index import (
     root_cache_dir,
     video_cache_path,
     load_index,
@@ -13,24 +13,24 @@ from app.cache_index import (
 
 
 def test_root_cache_dir(monkeypatch):
-    monkeypatch.setattr("app.cache_index.data_path", lambda: Path("/tmp/test_data"))
-    monkeypatch.setattr("app.cache_index.path_id", lambda p: "abcdef1234567890")
+    monkeypatch.setattr("app.services.cache_index.data_path", lambda: Path("/tmp/test_data"))
+    monkeypatch.setattr("app.services.cache_index.path_id", lambda p: "abcdef1234567890")
     result = root_cache_dir("/media/videos/Movies")
     expected = Path("/tmp/test_data/cache/Movies-abcd")
     assert result == expected, f"Expected {expected}, got {result}"
 
 
 def test_root_cache_dir_first_four_chars_used(monkeypatch):
-    monkeypatch.setattr("app.cache_index.data_path", lambda: Path("/tmp/test_data"))
-    monkeypatch.setattr("app.cache_index.path_id", lambda p: "9876543210abcdef")
+    monkeypatch.setattr("app.services.cache_index.data_path", lambda: Path("/tmp/test_data"))
+    monkeypatch.setattr("app.services.cache_index.path_id", lambda p: "9876543210abcdef")
     result = root_cache_dir("/some/root")
     expected = Path("/tmp/test_data/cache/root-9876")
     assert result == expected
 
 
 def test_video_cache_path(monkeypatch, tmp_path):
-    monkeypatch.setattr("app.cache_index.data_path", lambda: tmp_path)
-    monkeypatch.setattr("app.cache_index.path_id", lambda p: "abcdef1234567890")
+    monkeypatch.setattr("app.services.cache_index.data_path", lambda: tmp_path)
+    monkeypatch.setattr("app.services.cache_index.path_id", lambda p: "abcdef1234567890")
     root = "/media/videos"
     video = "/media/videos/movies/dune.mkv"
     index_path, thumb_path = video_cache_path(root, video)
@@ -43,8 +43,8 @@ def test_video_cache_path(monkeypatch, tmp_path):
 
 
 def test_video_cache_path_root_level_video(monkeypatch, tmp_path):
-    monkeypatch.setattr("app.cache_index.data_path", lambda: tmp_path)
-    monkeypatch.setattr("app.cache_index.path_id", lambda p: "abcdef1234567890")
+    monkeypatch.setattr("app.services.cache_index.data_path", lambda: tmp_path)
+    monkeypatch.setattr("app.services.cache_index.path_id", lambda p: "abcdef1234567890")
     root = "/media/videos"
     video = "/media/videos/dune.mkv"
     index_path, thumb_path = video_cache_path(root, video)
@@ -56,11 +56,14 @@ def test_video_cache_path_root_level_video(monkeypatch, tmp_path):
 
 def test_round_trip_save_load(tmp_path):
     index_path = tmp_path / "index.yaml"
+    # 扁平 schema：file_size 单位 MB（整数），分辨率标签为 resolution_label
     videos = [
         {
             "file_name": "dune.mkv",
-            "file_size_gb": 8.0,
-            "resolution": "3840x2160",
+            "file_size": 8192,  # MB
+            "width": 3840,
+            "height": 2160,
+            "resolution_label": "4K",
             "codec": "HEVC",
         }
     ]
@@ -100,7 +103,7 @@ def test_load_missing_videos_key_returns_empty(tmp_path):
 
 
 def test_update_video_in_index_add(monkeypatch, tmp_path):
-    monkeypatch.setattr("app.cache_index.data_path", lambda: tmp_path)
+    monkeypatch.setattr("app.services.cache_index.data_path", lambda: tmp_path)
     index_path = tmp_path / "index.yaml"
     video = {"file_name": "dune.mkv", "codec": "HEVC"}
     update_video_in_index(index_path, video)
@@ -109,10 +112,10 @@ def test_update_video_in_index_add(monkeypatch, tmp_path):
 
 
 def test_update_video_in_index_replace_existing(monkeypatch, tmp_path):
-    monkeypatch.setattr("app.cache_index.data_path", lambda: tmp_path)
+    monkeypatch.setattr("app.services.cache_index.data_path", lambda: tmp_path)
     index_path = tmp_path / "index.yaml"
-    v1 = {"file_name": "dune.mkv", "codec": "HEVC", "resolution": "3840x2160"}
-    v2 = {"file_name": "dune.mkv", "codec": "H264", "resolution": "1920x1080"}
+    v1 = {"file_name": "dune.mkv", "codec": "HEVC", "resolution_label": "4K", "width": 3840, "height": 2160}
+    v2 = {"file_name": "dune.mkv", "codec": "H264", "resolution_label": "FHD", "width": 1920, "height": 1080}
     update_video_in_index(index_path, v1)
     update_video_in_index(index_path, v2)
     loaded = load_index(index_path)
@@ -121,7 +124,7 @@ def test_update_video_in_index_replace_existing(monkeypatch, tmp_path):
 
 
 def test_update_video_in_index_preserves_other_entries(monkeypatch, tmp_path):
-    monkeypatch.setattr("app.cache_index.data_path", lambda: tmp_path)
+    monkeypatch.setattr("app.services.cache_index.data_path", lambda: tmp_path)
     index_path = tmp_path / "index.yaml"
     v1 = {"file_name": "dune.mkv"}
     v2 = {"file_name": "other.mkv"}
@@ -159,39 +162,48 @@ def test_remove_video_from_index_empty(tmp_path):
     assert load_index(index_path) == []
 
 
-def test_resolution_string_stored_correctly(tmp_path):
-    """Verify the resolution field is correctly stored as 'WxH' string."""
+def test_flat_metadata_stored_correctly(tmp_path):
+    """Verify width/height/resolution_label flat fields are stored and round-trip.
+
+    扁平 schema 不含 'resolution' 字符串字段，分辨率标签以 resolution_label 存储。
+    """
     index_path = tmp_path / "index.yaml"
     video = {
         "file_name": "test.mkv",
         "width": 3840,
         "height": 2160,
-        "resolution": "3840x2160",
+        "resolution_label": "4K",
     }
     save_index(index_path, [video])
     loaded = load_index(index_path)
-    assert loaded[0]["resolution"] == "3840x2160"
-    # Verify the raw YAML contains the resolution string
+    assert loaded[0]["width"] == 3840
+    assert loaded[0]["height"] == 2160
+    assert loaded[0]["resolution_label"] == "4K"
+    # 扁平 schema 不应存在 legacy 的 resolution 字符串字段
+    assert "resolution" not in loaded[0]
+    # Verify the raw YAML contains the resolution label and dimensions
     with open(index_path) as f:
         raw = f.read()
-    assert "3840x2160" in raw
+    assert "resolution_label: 4K" in raw
+    assert "width: 3840" in raw
 
 
-def test_resolution_from_width_height_fields(monkeypatch, tmp_path):
-    """Test that when a caller provides width/height, the resolution
-    string is correctly formatted when saving and loading."""
-    monkeypatch.setattr("app.cache_index.data_path", lambda: tmp_path)
+def test_resolution_label_from_width_height_fields(monkeypatch, tmp_path):
+    """Test that width/height + resolution_label flat fields are stored and loaded."""
+    monkeypatch.setattr("app.services.cache_index.data_path", lambda: tmp_path)
     index_path = tmp_path / "index.yaml"
     width, height = 1920, 1080
     video = {
         "file_name": "video.mp4",
         "width": width,
         "height": height,
-        "resolution": f"{width}x{height}",
+        "resolution_label": "FHD",
     }
     save_index(index_path, [video])
     loaded = load_index(index_path)
-    assert loaded[0]["resolution"] == "1920x1080"
+    assert loaded[0]["width"] == 1920
+    assert loaded[0]["height"] == 1080
+    assert loaded[0]["resolution_label"] == "FHD"
 
 
 def test_get_thumb_path_found(tmp_path):
@@ -233,11 +245,11 @@ def test_save_index_preserves_field_order(tmp_path):
     index_path = tmp_path / "index.yaml"
     video = {
         "file_name": "dune.mkv",
-        "file_size_gb": 8.0,
-        "resolution": "3840x2160",
+        "file_size": 8192,  # MB
+        "resolution_label": "4K",
         "codec": "HEVC",
         "create_time": 1720900000,
-        "modify_time": 1720900000.0,
+        "modify_time": 1720900000,
         "thumb_file": "dune.jpg",
     }
     save_index(index_path, [video])
@@ -246,9 +258,9 @@ def test_save_index_preserves_field_order(tmp_path):
     # The first field is prefixed with "- " in YAML block sequence; strip it
     key_lines = [l.lstrip("- ") for l in lines]
     idx = key_lines.index("file_name: dune.mkv")
-    file_size_idx = key_lines.index("file_size_gb: 8.0")
+    file_size_idx = key_lines.index("file_size: 8192")
     codec_idx = key_lines.index("codec: HEVC")
     thumb_idx = key_lines.index("thumb_file: dune.jpg")
-    assert file_size_idx > idx, "file_size_gb should come after file_name"
-    assert codec_idx > file_size_idx, "codec should come after file_size_gb"
+    assert file_size_idx > idx, "file_size should come after file_name"
+    assert codec_idx > file_size_idx, "codec should come after file_size"
     assert thumb_idx > codec_idx, "thumb_file should come after codec"

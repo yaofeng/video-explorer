@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Response
 from pathlib import Path
 from .. import config, path_id
-from ..scanner import Scanner
+from ..services.scanner import Scanner
 
 router = APIRouter()
 scanner = Scanner()

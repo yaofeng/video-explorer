@@ -3,13 +3,34 @@ import threading
 import time
 from collections import OrderedDict
 from pathlib import Path
-from . import config, probe, cache_index, thumbgen, path_id
-from .probe import resolution_label
+from . import probe, cache_index, thumbgen
+from .. import config, path_id
 
 VIDEO_EXTS = {".mp4", ".mkv", ".mov", ".avi", ".m4v", ".flv", ".webm", ".wmv", ".ts", ".mpg", ".mpeg", ".3gp", ".rm", ".rmvb"}
 
 # 最多缓存的 L2 目录状态数（LRU 淘汰），避免无限内存增长
 MAX_CACHED_L2_DIRS = 20
+
+
+def _resolution_label(height: int) -> str:
+    """根据视频高度计算分辨率标签（4K/2K/FHD/HD/SD/LD）。
+
+    从 probe.py 移出，由 scanner 在写入缓存时本地计算。
+    前端也可独立计算（参见 VideoCard.vue formatResolution）。
+    """
+    if height >= 2160:
+        return "4K"
+    if height >= 1440:
+        return "2K"
+    if height >= 1080:
+        return "FHD"
+    if height >= 720:
+        return "HD"
+    if height >= 480:
+        return "SD"
+    if height >= 360:
+        return "LD"
+    return f"{height}P" if height else "Unknown"
 
 
 def _parse_filename(file_name: str, rules: list[dict]) -> dict | None:
@@ -38,23 +59,27 @@ def _parse_filename(file_name: str, rules: list[dict]) -> dict | None:
 
 def _build_cache_entry(video_path: Path, item: dict, level: int,
                        thumb_file: str | None = None) -> dict:
-    """构建扁平化的 index.yaml 条目。"""
+    """构建扁平化的 index.yaml 条目。
+
+    item 为扁平结构（无 meta 嵌套），与 API 响应一致。
+    """
     stat = video_path.stat()
-    meta = item.get("meta") or {}
     entry = {
         "file_name": video_path.name,
         "group": item.get("group"),
         "level": level,
         "create_time": int(stat.st_ctime),
         "modify_time": int(stat.st_mtime),
+        # 缓存中 file_size 单位为 MB（整数），读取时再转换为 bytes
         "file_size": int(stat.st_size / (1024 * 1024)),
     }
-    if meta:
-        entry["codec"] = meta.get("codec")
-        entry["width"] = meta.get("width")
-        entry["height"] = meta.get("height")
-        entry["duration"] = int(meta.get("duration", 0) or 0)
-        entry["resolution_label"] = meta.get("resolution_label")
+    # L2+ 元数据字段（直接从 item 读取，不再从 meta 嵌套读取）
+    if level >= 2:
+        entry["codec"] = item.get("codec")
+        entry["width"] = item.get("width")
+        entry["height"] = item.get("height")
+        entry["duration"] = int(item.get("duration", 0) or 0)
+        entry["resolution_label"] = item.get("resolution_label")
     ext = item.get("ext")
     if ext:
         entry["ext"] = ext
@@ -63,25 +88,27 @@ def _build_cache_entry(video_path: Path, item: dict, level: int,
     return entry
 
 
-def _meta_from_cache(cached: dict) -> dict | None:
-    """从扁平缓存条目重建内存中的 meta 字典（供 API 返回）。
+def _merge_metadata(item: dict, probe_result: dict) -> None:
+    """将 probe 结果合并到扁平 item 中（原地修改）。"""
+    item["codec"] = probe_result["codec"]
+    item["width"] = probe_result["width"]
+    item["height"] = probe_result["height"]
+    item["duration"] = probe_result["duration"]
+    item["resolution_label"] = _resolution_label(probe_result["height"])
 
-    内存 meta 保留 resolution_str 和字节级 file_size 以兼容现有 API。
+
+def _apply_cache_to_item(item: dict, cached: dict) -> None:
+    """将缓存条目中的元数据字段合并到扁平 item（原地修改）。
+
+    缓存和 API 中 file_size 单位统一为 MB（整数）。
     """
     if not cached.get("codec"):
-        return None
-    width = cached.get("width", 0) or 0
-    height = cached.get("height", 0) or 0
-    file_size_mb = cached.get("file_size", 0) or 0
-    return {
-        "codec": cached["codec"],
-        "width": width,
-        "height": height,
-        "duration": float(cached.get("duration", 0) or 0),
-        "resolution_str": f"{width}x{height}",
-        "file_size": file_size_mb * 1024 * 1024,  # MB → bytes
-        "resolution_label": cached.get("resolution_label", ""),
-    }
+        return
+    item["codec"] = cached["codec"]
+    item["width"] = cached.get("width", 0) or 0
+    item["height"] = cached.get("height", 0) or 0
+    item["duration"] = float(cached.get("duration", 0) or 0)
+    item["resolution_label"] = cached.get("resolution_label", "")
 
 
 def find_root(video_path: str, roots: list[str]) -> Path | None:
@@ -229,16 +256,15 @@ class Scanner:
                     if int(cached.get("modify_time", 0)) < source_mtime:
                         continue  # 源文件已更新，缓存过期
                     if cached.get("level", 1) >= 3 and cached.get("thumb_file") and thumb_path.exists():
-                        meta = _meta_from_cache(cached)
                         item = {
                             "video_id": vid,
                             "file_name": video_path.name,
-                            "file_size": video_path.stat().st_size,
+                            "file_size": int(video_path.stat().st_size / (1024 * 1024)),  # bytes → MB
                             "modify_time": source_mtime,
                             "group": self._group_name(str(video_path), l2_path),
                             "level": 3,
-                            "meta": meta,
                         }
+                        _apply_cache_to_item(item, cached)
                         if "ext" in cached:
                             item["ext"] = cached["ext"]
                         with state.lock:
@@ -257,17 +283,16 @@ class Scanner:
                     continue
 
                 group_name = self._group_name(str(video_path), l2_path)
-                file_size = video_path.stat().st_size
+                file_size = int(video_path.stat().st_size / (1024 * 1024))  # bytes → MB
                 file_mtime = int(video_path.stat().st_mtime)
 
                 item = {
                     "video_id": vid,
                     "file_name": video_path.name,
-                    "file_size": file_size,
+                    "file_size": file_size,  # MB
                     "modify_time": file_mtime,
                     "group": group_name,
                     "level": 1,
-                    "meta": None,
                 }
 
                 # 应用文件名解析规则
@@ -301,39 +326,32 @@ class Scanner:
                     if state.videos.get(vid, {}).get("level", 1) >= 2:
                         continue
 
-                meta = None
                 probe_result = None
                 try:
                     probe_result = probe.probe_video(str(video_path))
-                    meta = {
-                        "codec": probe_result["codec"],
-                        "width": probe_result["width"],
-                        "height": probe_result["height"],
-                        "duration": probe_result["duration"],
-                        "resolution_str": probe_result["resolution_str"],
-                        "file_size": probe_result["file_size"],
-                        "resolution_label": resolution_label(probe_result["height"]),
-                    }
                 except Exception:
-                    meta = None
+                    probe_result = None
 
                 with state.lock:
-                    if vid in state.videos:
-                        state.videos[vid]["meta"] = meta
+                    if vid in state.videos and probe_result is not None:
+                        _merge_metadata(state.videos[vid], probe_result)
                         state.videos[vid]["level"] = 2
                         state.videos[vid]["_probe"] = probe_result
                         processed = sum(1 for v in state.videos.values() if v.get("level", 1) >= 2)
                 self._update_task(scan_task_id, done=processed)
 
                 # 持久化元数据（磁盘 I/O，在锁外）
-                if root and meta:
+                if root and probe_result is not None:
                     index_path, _ = cache_index.video_cache_path(
                         str(root), str(video_path)
                     )
-                    tmp_item = {"group": self._group_name(str(video_path), l2_path), "meta": meta}
+                    # 从 state 读取扁平 item 用于缓存写入
+                    with state.lock:
+                        item_snapshot = dict(state.videos.get(vid, {}))
+                    item_snapshot["group"] = self._group_name(str(video_path), l2_path)
                     cache_index.update_video_in_index(
                         index_path,
-                        _build_cache_entry(video_path, tmp_item, level=2),
+                        _build_cache_entry(video_path, item_snapshot, level=2),
                     )
 
             # ---------------------------------------------------------------
@@ -442,6 +460,7 @@ class Scanner:
             updates = []
             for vid, item in state.videos.items():
                 if item.get("seq", -1) > since:
+                    # 扁平更新条目：基础字段 + 可选元数据字段
                     entry = {
                         "seq": item["seq"],
                         "video_id": vid,
@@ -450,8 +469,17 @@ class Scanner:
                         "group": item["group"],
                         "level": item.get("level", 1),
                     }
-                    if item.get("meta") is not None:
-                        entry["meta"] = item["meta"]
+                    if item.get("modify_time") is not None:
+                        entry["modify_time"] = item["modify_time"]
+                    if item.get("ext") is not None:
+                        entry["ext"] = item["ext"]
+                    # L2+ 元数据字段
+                    if item.get("level", 1) >= 2 and item.get("codec"):
+                        entry["codec"] = item["codec"]
+                        entry["width"] = item.get("width")
+                        entry["height"] = item.get("height")
+                        entry["duration"] = item.get("duration")
+                        entry["resolution_label"] = item.get("resolution_label")
                     updates.append(entry)
             updates.sort(key=lambda u: u["seq"])
 

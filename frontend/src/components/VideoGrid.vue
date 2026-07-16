@@ -8,7 +8,7 @@
         class="mt-2 text-sm text-indigo-600 dark:text-indigo-400 hover:underline"
       >清除筛选条件</button>
     </div>
-    <div v-for="group in filteredGroups" :key="group.name" class="mb-8">
+    <div v-for="group in paginatedGroups" :key="group.name" class="mb-8">
       <h3
         v-if="group.name !== '未分组'"
         class="text-sm font-semibold mb-3 text-slate-500 dark:text-slate-400 uppercase tracking-wide"
@@ -21,13 +21,33 @@
           @showLightbox="(v) => $emit('showLightbox', v)"
         />
       </div>
+      <!-- 分页控件 -->
+      <div
+        v-if="pageSize > 0 && getGroupTotalPages(group.name) > 1"
+        class="mt-4 flex items-center justify-center gap-2"
+      >
+        <button
+          @click="changePage(group.name, -1)"
+          :disabled="currentPage[group.name] <= 1"
+          class="px-3 py-1 text-sm rounded bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-300 dark:hover:bg-slate-600"
+        >上一页</button>
+        <span class="text-sm text-slate-600 dark:text-slate-400">
+          {{ currentPage[group.name] }} / {{ getGroupTotalPages(group.name) }}
+        </span>
+        <button
+          @click="changePage(group.name, 1)"
+          :disabled="currentPage[group.name] >= getGroupTotalPages(group.name)"
+          class="px-3 py-1 text-sm rounded bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-300 dark:hover:bg-slate-600"
+        >下一页</button>
+      </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, reactive, watch } from 'vue'
 import { useFilterStore } from '../stores/filter'
+import { useConfigStore } from '../stores/config'
 import VideoCard from './VideoCard.vue'
 
 const props = defineProps<{
@@ -39,6 +59,12 @@ defineEmits<{
 }>()
 
 const filter = useFilterStore()
+const config = useConfigStore()
+
+const pageSize = computed(() => config.page_size || 0)
+
+// 每个组的当前页码
+const currentPage = reactive<Record<string, number>>({})
 
 const KNOWN_CODECS = ['H264', 'HEVC', 'AV1']
 
@@ -50,8 +76,8 @@ function videoMatches(v: any): boolean {
   }
   // 编码过滤（排除模式）：excludedCodecs 记录被取消勾选的编码
   // 全选状态（排除列表为空）= 不过滤
-  if (filter.excludedCodecs.length > 0 && v.meta?.codec) {
-    const c = v.meta.codec
+  if (filter.excludedCodecs.length > 0 && v.codec) {
+    const c = v.codec
     const excludedOther = filter.excludedCodecs.includes('OTHER')
     const excludedKnown = filter.excludedCodecs.filter(k => KNOWN_CODECS.includes(k))
 
@@ -94,6 +120,51 @@ const filteredGroups = computed(() => {
     }))
     .filter(g => g.videos.length > 0)
 })
+
+// 计算每个组的总页数
+function getGroupTotalPages(groupName: string): number {
+  if (pageSize.value <= 0) return 1
+  const group = filteredGroups.value.find(g => g.name === groupName)
+  if (!group) return 1
+  return Math.ceil(group.videos.length / pageSize.value)
+}
+
+// 分页后的组
+const paginatedGroups = computed(() => {
+  if (pageSize.value <= 0) {
+    return filteredGroups.value
+  }
+  return filteredGroups.value.map(g => {
+    const page = currentPage[g.name] || 1
+    const start = (page - 1) * pageSize.value
+    const end = start + pageSize.value
+    return {
+      name: g.name,
+      videos: g.videos.slice(start, end),
+    }
+  })
+})
+
+function changePage(groupName: string, delta: number) {
+  const totalPages = getGroupTotalPages(groupName)
+  const current = currentPage[groupName] || 1
+  const newPage = Math.max(1, Math.min(totalPages, current + delta))
+  currentPage[groupName] = newPage
+}
+
+// 当筛选条件变化时，重置所有组的页码到第 1 页
+watch([() => filter.search, () => filter.excludedCodecs, () => filter.sortField, () => filter.sortDir], () => {
+  for (const key in currentPage) {
+    currentPage[key] = 1
+  }
+})
+
+// 当组数据变化时（如切换目录），重置页码
+watch(() => props.groups, () => {
+  for (const key in currentPage) {
+    delete currentPage[key]
+  }
+}, { deep: true })
 
 function clearFilters() {
   filter.setSearch('')

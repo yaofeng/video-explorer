@@ -3,7 +3,7 @@ import threading
 import time
 from pathlib import Path
 import subprocess
-from app.scanner import Scanner, find_root
+from app.services.scanner import Scanner, find_root
 from app import config
 
 

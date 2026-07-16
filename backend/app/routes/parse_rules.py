@@ -3,8 +3,8 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from .. import config
-from ..scanner import _parse_filename, find_root
-from ..cache_index import video_cache_path
+from ..services.scanner import _parse_filename, find_root
+from ..services.cache_index import video_cache_path
 
 router = APIRouter()
 

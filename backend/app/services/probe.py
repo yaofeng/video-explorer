@@ -2,7 +2,12 @@ import json
 import os
 import subprocess
 
+
 def probe_video(path: str) -> dict:
+    """使用 ffprobe 读取视频元数据。
+
+    返回原始分辨率字段（width, height），不计算 resolution_label。
+    """
     cmd = [
         "ffprobe", "-v", "error",
         "-show_streams", "-show_format",
@@ -38,7 +43,8 @@ def probe_video(path: str) -> dict:
     height = int(vstream.get("height") or 0)
     codec = (vstream.get("codec_name") or "unknown").upper()
     duration = float(data.get("format", {}).get("duration") or vstream.get("duration") or 0.0)
-    file_size_bytes = os.path.getsize(path)
+    # 文件大小，单位：MB（整数）
+    file_size_mb = int(os.path.getsize(path) / (1024 * 1024))
 
     return {
         "codec": codec,
@@ -46,21 +52,5 @@ def probe_video(path: str) -> dict:
         "height": height,
         "duration": duration,
         "cover_stream_index": cover_index,
-        "resolution_str": f"{width}x{height}",
-        "file_size": file_size_bytes,
+        "file_size": file_size_mb,  # MB
     }
-
-def resolution_label(height: int) -> str:
-    if height >= 2160:
-        return "4K"
-    if height >= 1440:
-        return "2K"
-    if height >= 1080:
-        return "FHD"
-    if height >= 720:
-        return "HD"
-    if height >= 480:
-        return "SD"
-    if height >= 360:
-        return "LD"
-    return f"{height}P" if height else "Unknown"

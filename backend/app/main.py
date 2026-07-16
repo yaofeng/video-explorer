@@ -6,8 +6,7 @@ from contextlib import asynccontextmanager
 from . import config
 from .security import IPWhitelistMiddleware
 from .routes import config as config_routes, dirs, videos, scan, parse_rules
-import logging
-from logging.handlers import RotatingFileHandler
+from .logging_setup import setup_logging
 
 
 @asynccontextmanager
@@ -24,16 +23,7 @@ app = FastAPI(lifespan=lifespan)
 app.add_middleware(IPWhitelistMiddleware)
 
 # 日志
-log_dir = config.data_path() / "logs"
-log_dir.mkdir(parents=True, exist_ok=True)
-handler = RotatingFileHandler(
-    log_dir / "app.log", maxBytes=10*1024*1024, backupCount=5, encoding="utf-8"
-)
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    handlers=[handler, logging.StreamHandler()],
-)
+setup_logging(config.data_path() / "logs")
 
 # API 路由
 app.include_router(config_routes.router, prefix="/api")

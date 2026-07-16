@@ -1,7 +1,7 @@
 """Tests for thumbgen: raw frame extraction from videos."""
 
-from app.probe import probe_video
-from app.thumbgen import extract_frame, extract_frame_from_probe
+from app.services.probe import probe_video
+from app.services.thumbgen import extract_frame, extract_frame_from_probe
 
 
 def test_extract_frame_returns_jpeg(sample_video):

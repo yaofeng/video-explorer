@@ -1,8 +1,8 @@
 from fastapi import APIRouter, HTTPException, Response
-from ..services.scanner import Scanner
+from ..services.scanner import get_shared_scanner
 
 router = APIRouter()
-scanner = Scanner()
+scanner = get_shared_scanner()
 
 
 @router.get("/frames/{video_id}")

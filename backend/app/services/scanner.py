@@ -781,3 +781,15 @@ class Scanner:
                 with task.lock:
                     task.running = False
             self._remove_task(task_id)
+
+
+# 共享 Scanner 实例，供所有路由模块使用，确保 _id_to_path 映射一致。
+_shared_scanner: Scanner | None = None
+
+
+def get_shared_scanner() -> Scanner:
+    """返回全局共享的 Scanner 实例（懒初始化单例）。"""
+    global _shared_scanner
+    if _shared_scanner is None:
+        _shared_scanner = Scanner()
+    return _shared_scanner

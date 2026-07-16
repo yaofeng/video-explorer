@@ -3,8 +3,9 @@ import logging
 import threading
 import time
 from collections import OrderedDict
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from . import probe, cache_index, thumbgen
+from . import probe, cache_index, thumbgen, framegen
 from .. import config, path_id
 from ..safe_regex import safe_match
 
@@ -164,6 +165,7 @@ class Scanner:
         self._lock = threading.Lock()  # 保护 _l2_states 和 _id_to_path
         self._tasks = {}  # task_id -> _Task
         self._tasks_lock = threading.Lock()
+        self._frame_executor = ThreadPoolExecutor(max_workers=2)
 
     def _get_l2_state(self, l2_path: str) -> _L2State:
         with self._lock:
@@ -596,6 +598,100 @@ class Scanner:
                 small_path.write_bytes(small_bytes)
             return ("image/jpeg", small_path.read_bytes())
         return ("image/jpeg", full_path.read_bytes())
+
+    def get_frames_dir(self, video_id: str) -> Path | None:
+        """返回视频帧目录路径。video_id 未知时返回 None。"""
+        with self._lock:
+            video_path = self._id_to_path.get(video_id)
+        if video_path is None:
+            return None
+        cfg = config.load_config()
+        root = find_root(video_path, cfg.video_path_list)
+        if root is None:
+            return None
+        index_path, thumb_path = cache_index.video_cache_path(str(root), video_path)
+        return framegen.get_frames_dir(thumb_path)
+
+    def get_frame_status(self, video_id: str) -> dict | None:
+        """返回帧抽取状态。video_id 未知时返回 None。"""
+        frames_dir = self.get_frames_dir(video_id)
+        if frames_dir is None:
+            return None
+        status = framegen.read_status(frames_dir)
+        if status is None:
+            return {
+                "status": "not_started",
+                "total": framegen.FRAME_COUNT,
+                "ready_count": 0,
+                "frame_urls": [None] * framegen.FRAME_COUNT,
+            }
+        # 构建 frame_urls
+        frame_urls = []
+        for i in range(framegen.FRAME_COUNT):
+            if (frames_dir / f"frame_{i:02d}.jpg").exists():
+                frame_urls.append(f"/api/frames/{video_id}/{i}")
+            else:
+                frame_urls.append(None)
+        return {
+            "status": "ready" if not status.get("generating") else "generating",
+            "total": status["total"],
+            "ready_count": status["ready_count"],
+            "frame_urls": frame_urls,
+        }
+
+    def generate_frames(self, video_id: str) -> bool:
+        """触发异步帧抽取。已在生成中或已完成时返回 False。"""
+        with self._lock:
+            video_path = self._id_to_path.get(video_id)
+        if video_path is None:
+            return False
+        frames_dir = self.get_frames_dir(video_id)
+        if frames_dir is None:
+            return False
+
+        # 检查状态：已完成或正在生成则跳过
+        status = framegen.read_status(frames_dir)
+        if status is not None:
+            if not status.get("generating", False):
+                return False  # 已完成
+            return False  # 正在生成中
+
+        # 提交到线程池
+        cfg = config.load_config()
+        root = find_root(video_path, cfg.video_path_list)
+        if root is None:
+            return False
+        index_path, _ = cache_index.video_cache_path(str(root), video_path)
+        # 从 index.yaml 读取 duration
+        videos = cache_index.load_index(index_path)
+        duration = 0.0
+        width = 0
+        height = 0
+        fname = Path(video_path).name
+        for v in videos:
+            if v.get("file_name") == fname:
+                duration = float(v.get("duration") or 0)
+                width = int(v.get("width") or 0)
+                height = int(v.get("height") or 0)
+                break
+
+        self._frame_executor.submit(
+            framegen.extract_all_frames,
+            video_path, frames_dir, duration, width, height,
+        )
+        return True
+
+    def get_frame_jpeg(self, video_id: str, frame_index: int) -> bytes | None:
+        """返回指定帧的 JPEG bytes。不存在返回 None。"""
+        frames_dir = self.get_frames_dir(video_id)
+        if frames_dir is None:
+            return None
+        if frame_index < 0 or frame_index >= framegen.FRAME_COUNT:
+            return None
+        frame_path = frames_dir / f"frame_{frame_index:02d}.jpg"
+        if not frame_path.exists():
+            return None
+        return frame_path.read_bytes()
 
     # ------------------------------------------------------------------
     # 任务进度跟踪（供前端浮窗显示）

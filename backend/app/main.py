@@ -5,7 +5,7 @@ from pathlib import Path
 from contextlib import asynccontextmanager
 from . import config
 from .security import IPWhitelistMiddleware
-from .routes import config as config_routes, dirs, videos, scan, parse_rules, frames
+from .routes import config as config_routes, dirs, videos, scan, parse_rules, frames, video
 from .logging_setup import setup_logging
 
 
@@ -32,6 +32,7 @@ app.include_router(videos.router, prefix="/api")
 app.include_router(scan.router, prefix="/api")
 app.include_router(parse_rules.router, prefix="/api")
 app.include_router(frames.router, prefix="/api")
+app.include_router(video.router, prefix="/api")
 
 
 @app.get("/api/health")

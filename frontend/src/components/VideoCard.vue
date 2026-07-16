@@ -20,7 +20,7 @@
           {{ video.codec || '-' }}
         </div>
         <div class="absolute top-2 right-2 bg-black/55 backdrop-blur-sm text-white text-[11px] font-medium px-1.5 py-0.5 rounded-md">
-          {{ formatResolution(video.height || 0) }}
+          {{ video.resolution_label || formatResolution(video.height || 0) }}
         </div>
         <div class="absolute bottom-2 left-2 bg-black/55 backdrop-blur-sm text-white text-[11px] font-medium px-1.5 py-0.5 rounded-md tabular-nums">
           {{ formatDuration(video.duration) }}
@@ -111,7 +111,9 @@ function formatDuration(sec?: number): string {
 }
 
 function formatSize(mb: number): string {
-  // MB → GB（保留 1 位小数）
+  // file_size 单位为 MB；按量级选 MB/GB 显示（L4）
+  if (!mb || mb <= 0) return '-'
+  if (mb < 1024) return `${mb}M`
   const gb = mb / 1024
   return `${gb.toFixed(1)}G`
 }

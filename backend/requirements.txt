@@ -1,7 +1,8 @@
-fastapi>=0.110.0
-uvicorn[standard]>=0.29.0
-pyyaml>=6.0.1
-pillow>=10.3.0
-python-dotenv>=1.0.1
-pytest>=8.1.0
-httpx>=0.27.0
+# 精确钉版以保证可复现构建（L8）。升级时手动 bump 并回归测试。
+fastapi==0.115.0
+uvicorn[standard]==0.32.0
+pyyaml==6.0.2
+pillow==11.0.0
+python-dotenv==1.0.1
+pytest==8.3.3
+httpx==0.27.2

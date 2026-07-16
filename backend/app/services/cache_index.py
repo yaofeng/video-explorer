@@ -1,3 +1,5 @@
+import os
+import tempfile
 import yaml
 from pathlib import Path
 from typing import Optional
@@ -48,23 +50,53 @@ def load_index(index_path: Path) -> list[dict]:
 
 
 def save_index(index_path: Path, videos: list[dict]) -> None:
-    """Save a list of video dicts to *index_path* as YAML."""
+    """Save a list of video dicts to *index_path* as YAML.
+
+    原子写：临时文件 + os.replace，避免写入中途崩溃导致 index.yaml 损坏（M4）。
+    """
     data = {"videos": videos}
-    with open(index_path, "w", encoding="utf-8") as f:
-        yaml.safe_dump(data, f, allow_unicode=True, sort_keys=False)
+    index_path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(dir=str(index_path.parent), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            yaml.safe_dump(data, f, allow_unicode=True, sort_keys=False)
+        os.replace(tmp_path, index_path)
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+
+
+def _upsert_entry(videos: list[dict], video_info: dict) -> list[dict]:
+    """Add *video_info* or replace the entry with the same ``file_name`` (in place)."""
+    file_name = video_info.get("file_name")
+    for i, v in enumerate(videos):
+        if v.get("file_name") == file_name:
+            videos[i] = video_info
+            return videos
+    videos.append(video_info)
+    return videos
 
 
 def update_video_in_index(index_path: Path, video_info: dict) -> None:
     """Add *video_info* to the index, or replace an existing entry with the
     same ``file_name``."""
     videos = load_index(index_path)
-    file_name = video_info.get("file_name")
-    for i, v in enumerate(videos):
-        if v.get("file_name") == file_name:
-            videos[i] = video_info
-            break
-    else:
-        videos.append(video_info)
+    _upsert_entry(videos, video_info)
+    save_index(index_path, videos)
+
+
+def upsert_many(index_path: Path, entries: list[dict]) -> None:
+    """批量 upsert 多条 entry 后只写一次磁盘（M4，缓解 O(N²) 读改写）。
+
+    对同一 index_path 的多次更新应聚合后调用本函数，避免每条都做一次
+    完整的读→改→写。
+    """
+    videos = load_index(index_path)
+    for entry in entries:
+        _upsert_entry(videos, entry)
     save_index(index_path, videos)
 
 

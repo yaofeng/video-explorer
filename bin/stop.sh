@@ -1,4 +1,9 @@
 #!/bin/bash
+set -euo pipefail
+
+# 切到仓库根目录（基于脚本自身位置），保证可从任意 cwd 执行（L7）
+cd "$(dirname "$0")/.."
+
 _parse_env() { grep -m1 "^export $1=\|^$1=" .env 2>/dev/null | sed 's/^export //' | cut -d= -f2-; }
 DATA_PATH=$(_parse_env DATA_PATH)
 DATA_PATH=${DATA_PATH:-./data}

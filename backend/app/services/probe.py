@@ -1,5 +1,4 @@
 import json
-import os
 import subprocess
 
 
@@ -7,6 +6,7 @@ def probe_video(path: str) -> dict:
     """使用 ffprobe 读取视频元数据。
 
     返回原始分辨率字段（width, height），不计算 resolution_label。
+    文件大小由 scanner 在 L1 阶段 stat 得到，故此处不再返回（避免冗余）。
     """
     cmd = [
         "ffprobe", "-v", "error",
@@ -43,8 +43,6 @@ def probe_video(path: str) -> dict:
     height = int(vstream.get("height") or 0)
     codec = (vstream.get("codec_name") or "unknown").upper()
     duration = float(data.get("format", {}).get("duration") or vstream.get("duration") or 0.0)
-    # 文件大小，单位：MB（整数）
-    file_size_mb = int(os.path.getsize(path) / (1024 * 1024))
 
     return {
         "codec": codec,
@@ -52,5 +50,4 @@ def probe_video(path: str) -> dict:
         "height": height,
         "duration": duration,
         "cover_stream_index": cover_index,
-        "file_size": file_size_mb,  # MB
     }

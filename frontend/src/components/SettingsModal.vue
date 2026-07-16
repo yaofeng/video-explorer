@@ -181,6 +181,11 @@ const building = reactive<Record<number, boolean>>({})
 const pathToId = ref<Record<string, string>>({})
 const ruleTestOpen = ref(false)
 
+function normalizePath(p: string): string {
+  // 与后端 r.path（resolve 后的绝对路径）对齐：去空白、去尾部分隔符、统一正斜杠
+  return (p || '').trim().replace(/\\/g, '/').replace(/\/+$/, '')
+}
+
 watch(() => props.open, async (isOpen) => {
   if (!isOpen) return
   await config.fetch()
@@ -188,8 +193,8 @@ watch(() => props.open, async (isOpen) => {
     const { data } = await axios.get('/api/roots')
     const map: Record<string, string> = {}
     for (const r of data) {
-      map[r.path] = r.id
-      map[r.name] = r.id
+      map[normalizePath(r.path)] = r.id
+      map[normalizePath(r.name)] = r.id
     }
     pathToId.value = map
   } catch {
@@ -211,7 +216,10 @@ async function save() {
 
 async function buildIndex(path: string, i: number) {
   if (!path) return
-  const rootId = pathToId.value[path] || pathToId.value[path.split('/').filter(Boolean).pop() || '']
+  // 规范化后查找根 ID，兜底用末尾路径段（L10）
+  const norm = normalizePath(path)
+  const lastSeg = norm.split('/').filter(Boolean).pop() || ''
+  const rootId = pathToId.value[norm] || pathToId.value[lastSeg]
   if (!rootId) {
     alert('未找到该目录的根 ID，请先保存配置')
     return

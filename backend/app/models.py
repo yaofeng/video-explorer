@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class VideoItem(BaseModel):
@@ -31,7 +31,7 @@ class Group(BaseModel):
 class VideosResponse(BaseModel):
     groups: list[Group]
     scanning: bool
-    progress: dict = {}  # {"total": N, "level1": N, "level2": N, "level3": N}
+    progress: dict = Field(default_factory=dict)  # {"total": N, "level1": N, "level2": N, "level3": N}
 
 
 class ScanUpdate(BaseModel):
@@ -56,18 +56,20 @@ class ScanStatus(BaseModel):
     total: int
     ready: int
     last_seq: int
-    progress: dict = {}
+    progress: dict = Field(default_factory=dict)
     updates: list[ScanUpdate]
 
 
 class ConfigModel(BaseModel):
+    """PUT /api/config 的入参模型，带取值约束（M13）。"""
     video_path_list: list[str]
-    page_size: int
-    column_size: int
-    parse_rules: list = []
+    page_size: int = Field(default=0, ge=0)        # 0 表示不分页
+    column_size: int = Field(default=4, ge=1, le=32)
+    parse_rules: list = Field(default_factory=list)
 
 
 class DirEntry(BaseModel):
     id: str
     name: str
     path: str
+

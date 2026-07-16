@@ -1,10 +1,14 @@
 import os
+import logging
 import threading
 import time
 from collections import OrderedDict
 from pathlib import Path
 from . import probe, cache_index, thumbgen
 from .. import config, path_id
+from ..safe_regex import safe_match
+
+logger = logging.getLogger(__name__)
 
 VIDEO_EXTS = {".mp4", ".mkv", ".mov", ".avi", ".m4v", ".flv", ".webm", ".wmv", ".ts", ".mpg", ".mpeg", ".3gp", ".rm", ".rmvb"}
 
@@ -38,22 +42,20 @@ def _parse_filename(file_name: str, rules: list[dict]) -> dict | None:
 
     规则格式：{"name": "JAV", "pattern": "^(?P<code>[A-Z]+-?\\d+)..."}
     匹配成功的 named groups 成为 ext 字段的 key-value。
+
+    使用带超时的 safe_match，避免用户提交的灾难性正则挂死扫描线程（H3）。
     """
-    import re
     if not rules:
         return None
     for rule in rules:
         pattern = rule.get("pattern", "")
         if not pattern:
             continue
-        try:
-            m = re.match(pattern, file_name)
-            if m:
-                ext = {k: v for k, v in m.groupdict().items() if v is not None}
-                if ext:
-                    return ext
-        except re.error:
-            continue
+        m = safe_match(pattern, file_name, timeout=2.0)
+        if m:
+            ext = {k: v for k, v in m.groupdict().items() if v is not None}
+            if ext:
+                return ext
     return None
 
 
@@ -78,7 +80,8 @@ def _build_cache_entry(video_path: Path, item: dict, level: int,
         entry["codec"] = item.get("codec")
         entry["width"] = item.get("width")
         entry["height"] = item.get("height")
-        entry["duration"] = int(item.get("duration", 0) or 0)
+        # 保留亚秒精度（L1）：round 到 3 位小数
+        entry["duration"] = round(float(item.get("duration", 0) or 0), 3)
         entry["resolution_label"] = item.get("resolution_label")
     ext = item.get("ext")
     if ext:
@@ -135,6 +138,11 @@ class _L2State:
         self.seq = 0
         self.videos = {}  # video_id -> dict
         self.last_used = 0.0  # LRU 时间戳
+        # 该 L2 目录是否已完整扫描到 L3（用于短路重复打开，M3）
+        self.fully_scanned = False
+        self.last_source_mtime = 0  # 完整扫描完成时记录的源目录最大 mtime
+        # 扫描完成事件（供 build_worker 等待，替代忙等，I4）
+        self.done_event = threading.Event()
 
 
 class _Task:
@@ -174,7 +182,22 @@ class Scanner:
                     # 正在扫描的不能驱逐，跳过（罕见情况）
                     break
                 self._l2_states.pop(old_path)
+                # 同步清理该 L2 目录下视频的 id→path 映射，避免无限增长（M5）
+                self._evict_id_to_path(old_path)
             return state
+
+    def _evict_id_to_path(self, l2_path: str) -> None:
+        """驱逐某个 L2 目录在 _id_to_path 中的条目（须持有 self._lock）。"""
+        try:
+            l2_resolved = str(Path(l2_path).resolve())
+        except OSError:
+            l2_resolved = l2_path
+        stale = [
+            vid for vid, p in self._id_to_path.items()
+            if str(p).startswith(l2_resolved + os.sep) or str(p) == l2_resolved
+        ]
+        for vid in stale:
+            self._id_to_path.pop(vid, None)
 
     def ensure_scan(self, l2_path: str):
         state = self._get_l2_state(l2_path)
@@ -182,23 +205,42 @@ class Scanner:
         # 在锁内只做状态判断和线程启动，不调用 _build_*（避免重入）
         with state.lock:
             already_scanning = state.scanning
-            if not already_scanning:
+            # M3：已完整扫描且目录 mtime 未变 → 直接短路返回，避免重复全量扫描
+            short_circuit = False
+            if not already_scanning and state.fully_scanned:
+                try:
+                    cur_mtime = int(Path(l2_path).stat().st_mtime)
+                    short_circuit = cur_mtime <= state.last_source_mtime
+                except OSError:
+                    short_circuit = False
+            if not already_scanning and not short_circuit:
                 state.scanning = True
+                state.done_event.clear()
                 t = threading.Thread(
                     target=self._scan_worker, args=(l2_path, state), daemon=True
                 )
                 t.start()
 
         # 锁已释放，安全调用 _build_*
-        if not already_scanning:
-            # 新启动的扫描，短暂等待快速阶段填充数据
-            time.sleep(0.5)
+        if not already_scanning and not short_circuit:
+            # 新启动的扫描，短暂等待快速阶段填充数据（I5：保留较小等待，
+            # 让首次响应即可携带 L1 数据；前端也会轮询补齐后续阶段）
+            time.sleep(0.3)
         return self._build_groups(state), state.scanning, self._build_progress(state)
 
     def _scan_worker(self, l2_path: str, state: _L2State):
+        scan_task_id = f"scan:{path_id.path_id(l2_path)}"
+        completed = False
         try:
-            cfg = config.load_config()
+            cfg = config.load_config()  # 只加载一次，循环内复用（M2）
             root = find_root(l2_path, cfg.video_path_list)
+            parse_rules = cfg.parse_rules
+
+            # L2 目录 mtime，用于完成时记录、下次短路判定（M3）
+            try:
+                l2_mtime = int(Path(l2_path).stat().st_mtime)
+            except OSError:
+                l2_mtime = 0
 
             # 收集视频文件
             video_paths = []
@@ -218,7 +260,6 @@ class Scanner:
                 state.total = len(video_paths)
 
             # 注册扫描任务（供前端浮窗显示进度）
-            scan_task_id = f"scan:{path_id.path_id(l2_path)}"
             self._register_task(scan_task_id, "scan", f"扫描: {Path(l2_path).name}")
             self._update_task(scan_task_id, total=len(video_paths))
 
@@ -275,8 +316,9 @@ class Scanner:
 
             # ---------------------------------------------------------------
             # Phase L1 — 快速阶段：文件系统扫描，收集文件级信息
-            # （跳过已完整缓存的视频）
+            # （跳过已完整缓存的视频）。index.yaml 按目录批量写一次（M4）。
             # ---------------------------------------------------------------
+            l1_pending: dict[Path, list[dict]] = {}
             for video_path in video_paths:
                 vid = path_id.path_id(str(video_path))
                 if vid in fully_cached_vids:
@@ -295,30 +337,32 @@ class Scanner:
                     "level": 1,
                 }
 
-                # 应用文件名解析规则
-                cfg = config.load_config()
-                ext_data = _parse_filename(video_path.name, cfg.parse_rules)
+                # 应用文件名解析规则（复用顶部加载的 cfg，M2）
+                ext_data = _parse_filename(video_path.name, parse_rules)
                 if ext_data:
                     item["ext"] = ext_data
-
-                # 持久化最小条目到 index.yaml（磁盘 I/O，在锁外）
-                if root:
-                    index_path, _ = cache_index.video_cache_path(
-                        str(root), str(video_path)
-                    )
-                    cache_index.update_video_in_index(
-                        index_path,
-                        _build_cache_entry(video_path, item, level=1),
-                    )
 
                 with state.lock:
                     state.seq += 1
                     item["seq"] = state.seq
                     state.videos[vid] = item
 
+                # 收集到待写缓冲，稍后按目录批量落盘（M4）
+                if root:
+                    index_path, _ = cache_index.video_cache_path(str(root), str(video_path))
+                    l1_pending.setdefault(index_path, []).append(
+                        _build_cache_entry(video_path, item, level=1)
+                    )
+
+            if root:
+                for ip, entries in l1_pending.items():
+                    cache_index.upsert_many(ip, entries)
+
             # ---------------------------------------------------------------
-            # Phase L2 — ffprobe 元数据
+            # Phase L2 — ffprobe 元数据。index.yaml 按目录批量写一次（M4）。
             # ---------------------------------------------------------------
+            processed = 0  # H1：初始化，避免 probe 失败时 NameError
+            l2_pending: dict[Path, list[dict]] = {}
             for video_path in video_paths:
                 vid = path_id.path_id(str(video_path))
 
@@ -340,23 +384,24 @@ class Scanner:
                         processed = sum(1 for v in state.videos.values() if v.get("level", 1) >= 2)
                 self._update_task(scan_task_id, done=processed)
 
-                # 持久化元数据（磁盘 I/O，在锁外）
+                # 收集到待写缓冲
                 if root and probe_result is not None:
-                    index_path, _ = cache_index.video_cache_path(
-                        str(root), str(video_path)
-                    )
-                    # 从 state 读取扁平 item 用于缓存写入
+                    index_path, _ = cache_index.video_cache_path(str(root), str(video_path))
                     with state.lock:
                         item_snapshot = dict(state.videos.get(vid, {}))
                     item_snapshot["group"] = self._group_name(str(video_path), l2_path)
-                    cache_index.update_video_in_index(
-                        index_path,
-                        _build_cache_entry(video_path, item_snapshot, level=2),
+                    l2_pending.setdefault(index_path, []).append(
+                        _build_cache_entry(video_path, item_snapshot, level=2)
                     )
 
+            if root:
+                for ip, entries in l2_pending.items():
+                    cache_index.upsert_many(ip, entries)
+
             # ---------------------------------------------------------------
-            # Phase L3 — 缩略图提取
+            # Phase L3 — 缩略图提取。index.yaml 按目录批量写一次（M4）。
             # ---------------------------------------------------------------
+            l3_pending: dict[Path, list[dict]] = {}
             for video_path in video_paths:
                 vid = path_id.path_id(str(video_path))
 
@@ -381,7 +426,7 @@ class Scanner:
                 index_path, thumb_path = cache_index.video_cache_path(
                     str(root), str(video_path)
                 )
-                # 写 PNG（磁盘 I/O，在锁外）
+                # 写 JPEG（磁盘 I/O，在锁外）
                 thumb_path.write_bytes(png_bytes)
 
                 # 锁内：只更新内存 level，并快照所需字段
@@ -392,21 +437,34 @@ class Scanner:
                         state.videos[vid].pop("_probe", None)
                         entry_snapshot = dict(state.videos[vid])
 
-                # 锁外：用快照持久化（磁盘 I/O）
+                # 收集到待写缓冲
                 if entry_snapshot:
-                    cache_index.update_video_in_index(
-                        index_path,
+                    l3_pending.setdefault(index_path, []).append(
                         _build_cache_entry(
                             video_path, entry_snapshot, level=3, thumb_file=thumb_path.name
-                        ),
+                        )
                     )
 
+            if root:
+                for ip, entries in l3_pending.items():
+                    cache_index.upsert_many(ip, entries)
+
+            completed = True
+
+        except Exception:
+            # H2：记录扫描失败，避免静默中止（原本只 try/finally）
+            logger.exception("scan worker failed for %s", l2_path)
         finally:
             with state.lock:
                 state.scanning = False
+                # M3：完整完成才标记 fully_scanned（异常时不标记，下次重扫）
+                if completed:
+                    state.fully_scanned = True
+                    state.last_source_mtime = l2_mtime
                 # 清理残留的临时 _probe 字段
                 for entry in state.videos.values():
                     entry.pop("_probe", None)
+            state.done_event.set()  # I4：通知等待者
             self._remove_task(scan_task_id)
 
     def _group_name(self, video_path: str, l2_path: str) -> str:
@@ -611,14 +669,15 @@ class Scanner:
             for idx, l2 in enumerate(l2_dirs):
                 # 触发该 L2 目录扫描（若已在扫描则跳过等待）
                 self.ensure_scan(l2)
-                # 等待该目录扫描完成
+                # 等待该目录扫描完成（I4：用 Event 替代忙等）
                 state = self._get_l2_state(l2)
                 while True:
                     with state.lock:
                         scanning = state.scanning
                     if not scanning:
                         break
-                    time.sleep(0.3)
+                    # 等待事件或超时重检（避免长时间持锁/忙轮询）
+                    state.done_event.wait(timeout=1.0)
                 self._update_task(task_id, done=idx + 1)
         finally:
             task = self._get_task(task_id)

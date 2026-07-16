@@ -1,5 +1,5 @@
 # 阶段 1：构建前端（使用 bun）
-FROM oven/bun:1 AS frontend-builder
+FROM oven/bun:1.1 AS frontend-builder
 WORKDIR /app/frontend
 COPY frontend/package*.json ./
 RUN bun install
@@ -12,8 +12,8 @@ RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debia
     sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list && \
     apt-get update && apt-get install -y ffmpeg curl && rm -rf /var/lib/apt/lists/*
 
-# 安装 uv
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+# 安装 uv（钉版，避免 :latest 浮动，L8）
+COPY --from=ghcr.io/astral-sh/uv:0.5.4 /uv /usr/local/bin/uv
 
 WORKDIR /app
 COPY backend/requirements.txt backend/

@@ -1,5 +1,6 @@
 import os
 import logging
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 import yaml
@@ -65,5 +66,17 @@ def save_config(cfg: AppConfig) -> None:
     }
     if cfg.parse_rules:
         data["parse_rules"] = cfg.parse_rules
-    with open(config_file(), "w", encoding="utf-8") as fh:
-        yaml.safe_dump(data, fh, allow_unicode=True, sort_keys=False)
+    # 原子写：先写临时文件再 os.replace，避免崩溃损坏 config.yaml（M4）。
+    target = config_file()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(dir=str(target.parent), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            yaml.safe_dump(data, fh, allow_unicode=True, sort_keys=False)
+        os.replace(tmp_path, target)
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise

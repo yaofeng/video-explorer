@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pathlib import Path
@@ -41,6 +41,7 @@ def health():
 # 静态文件（前端）
 static_dir = Path(__file__).parent / "static"
 if static_dir.exists():
+    static_root = static_dir.resolve()
 
     @app.get("/")
     def root():
@@ -48,8 +49,21 @@ if static_dir.exists():
 
     @app.get("/{path:path}")
     def catch_all(path: str):
-        file = static_dir / path
-        if file.exists():
-            return FileResponse(file)
+        # /api/* 走 FastAPI 路由，不存在的 API 路径应返回 JSON 404，
+        # 而不是被 SPA 兜底吞掉返回 HTML 200（M14）。
+        if path.startswith("api"):
+            raise HTTPException(404, "not found")
+
+        # 路径包含校验：解析后必须仍在 static_dir 内（C1 路径遍历防护）。
+        # %2e%2e 编码的 ".." 在路由后被解码，必须在此拦截。
+        target = (static_dir / path).resolve()
+        try:
+            target.relative_to(static_root)
+        except ValueError:
+            return FileResponse(static_dir / "index.html")
+
+        if target.exists() and target.is_file():
+            return FileResponse(target)
         # SPA 回退
         return FileResponse(static_dir / "index.html")
+

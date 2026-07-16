@@ -159,12 +159,14 @@ watch([() => filter.search, () => filter.excludedCodecs, () => filter.sortField,
   }
 })
 
-// 当组数据变化时（如切换目录），重置页码
-watch(() => props.groups, () => {
+// 当目录变化（分组名集合变化）时重置页码。
+// 用浅签名代替 deep watch，避免每次轮询合并都深遍历整个视频树（M12）。
+const groupSignature = computed(() => props.groups.map(g => g.name).join('\n'))
+watch(groupSignature, () => {
   for (const key in currentPage) {
     delete currentPage[key]
   }
-}, { deep: true })
+})
 
 function clearFilters() {
   filter.setSearch('')

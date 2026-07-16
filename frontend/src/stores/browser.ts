@@ -46,6 +46,8 @@ export const useBrowserStore = defineStore('browser', {
     groups: [] as Group[],
     scanning: false,
     progress: { total: 0, level1: 0, level2: 0, level3: 0 } as ProgressInfo,
+    // 上次轮询收到的最大 seq，用于增量拉取（M1）
+    lastSeq: 0,
   }),
   actions: {
     async fetchRoots() {
@@ -69,6 +71,8 @@ export const useBrowserStore = defineStore('browser', {
     },
     async selectL2(l2Id: string) {
       this.selectedL2Id = l2Id
+      // 切换目录时重置增量游标（M1）
+      this.lastSeq = 0
       const { data } = await axios.get(`/api/l2/${l2Id}/videos`)
       this.groups = data.groups
       this.scanning = data.scanning
@@ -81,11 +85,15 @@ export const useBrowserStore = defineStore('browser', {
     },
     async pollStatus() {
       if (!this.selectedL2Id) return
-      const { data } = await axios.get(`/api/scan-status?l2_id=${this.selectedL2Id}`)
+      // 增量拉取：只取 seq > lastSeq 的更新（M1，避免全量重复传输）
+      const { data } = await axios.get(
+        `/api/scan-status?l2_id=${this.selectedL2Id}&since=${this.lastSeq}`,
+      )
       this.scanning = data.scanning
       this.progress = data.progress || { total: 0, level1: 0, level2: 0, level3: 0 }
-      // Merge updates into groups（扁平字段直接合并）
+      // 合并增量更新到分组（扁平字段直接合并）；新增视频插入到对应 group
       for (const update of data.updates) {
+        let placed = false
         for (const group of this.groups) {
           if (group.name === update.group) {
             const existing = group.videos.find(v => v.video_id === update.video_id)
@@ -94,10 +102,28 @@ export const useBrowserStore = defineStore('browser', {
               Object.assign(existing, update)
               // 清理 scan 协议字段（不属于 VideoItem）
               delete (existing as any).seq
+              placed = true
+            } else {
+              // 扫描中新发现的视频，插入到该分组（M1）
+              const { seq, ...item } = update
+              group.videos.push(item as VideoItem)
+              placed = true
             }
             break
           }
         }
+        if (!placed) {
+          // 分组尚不存在 → 新建
+          const { seq, ...item } = update
+          this.groups.push({ name: update.group, videos: [item as VideoItem] })
+        }
+        if (typeof update.seq === 'number' && update.seq > this.lastSeq) {
+          this.lastSeq = update.seq
+        }
+      }
+      // 同步后端的 last_seq（无更新时也能前进游标）
+      if (typeof data.last_seq === 'number' && data.last_seq > this.lastSeq) {
+        this.lastSeq = data.last_seq
       }
     },
   },

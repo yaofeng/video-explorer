@@ -1,8 +1,8 @@
-import re
 from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from .. import config
+from ..safe_regex import safe_match
 from ..services.scanner import _parse_filename, find_root
 from ..services.cache_index import video_cache_path
 
@@ -82,15 +82,16 @@ def test_parse_rules(req: TestRuleRequest):
         matched_rule = None
         if ext:
             for rule in req.rules:
-                try:
-                    m = re.match(rule.get("pattern", ""), fn)
-                    if m:
-                        g = {k: v for k, v in m.groupdict().items() if v is not None}
-                        if g:
-                            matched_rule = rule.get("name", "")
-                            break
-                except re.error:
+                pattern = rule.get("pattern", "")
+                if not pattern:
                     continue
+                # 带超时的安全匹配，避免灾难性回溯挂死请求线程（H3）
+                m = safe_match(pattern, fn, timeout=2.0)
+                if m:
+                    g = {k: v for k, v in m.groupdict().items() if v is not None}
+                    if g:
+                        matched_rule = rule.get("name", "")
+                        break
         if ext:
             all_fields.update(ext.keys())
         results.append(TestRuleResult(

@@ -32,37 +32,51 @@
           </div>
         </div>
 
-        <!-- 大图预览区 -->
-        <div
-          class="relative bg-black rounded-lg overflow-hidden aspect-video flex items-center justify-center"
-          @contextmenu.prevent="onRightClick"
-        >
-          <img
-            v-if="displaySrc"
-            :src="displaySrc"
-            class="max-w-full max-h-full object-contain"
-          />
-          <p v-else class="text-slate-500 text-sm animate-pulse">加载中...</p>
-
-          <!-- 帧计数器 -->
-          <div
+        <!-- 大图预览区 + 左右箭头 -->
+        <div class="relative">
+          <!-- 左箭头 -->
+          <button
             v-if="framesReady"
-            class="absolute top-2 left-2 bg-black/60 text-white text-xs px-2 py-1 rounded-md backdrop-blur-sm"
+            @click.stop="onPrevFrame"
+            class="absolute left-2 top-1/2 -translate-y-1/2 z-10 w-10 h-10 bg-black/50 hover:bg-black/70 text-white rounded-full flex items-center justify-center transition hover:scale-110 backdrop-blur-sm"
+            title="上一帧 (←)"
           >
-            {{ currentFrame + 1 }} / {{ frames.length }}
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+          </button>
+
+          <div
+            class="relative bg-black rounded-lg overflow-hidden aspect-video flex items-center justify-center"
+            @contextmenu.prevent="onNextFrame"
+          >
+            <img
+              v-if="displaySrc"
+              :src="displaySrc"
+              class="max-w-full max-h-full object-contain"
+            />
+            <p v-else class="text-slate-500 text-sm animate-pulse">加载中...</p>
+
+            <!-- 帧计数器 -->
+            <div
+              v-if="framesReady"
+              class="absolute top-2 left-2 bg-black/60 text-white text-xs px-2 py-1 rounded-md backdrop-blur-sm"
+            >
+              {{ currentFrame + 1 }} / {{ frames.length }}
+            </div>
           </div>
 
-          <!-- 右键提示 -->
-          <div
+          <!-- 右箭头 -->
+          <button
             v-if="framesReady"
-            class="absolute bottom-2 right-2 bg-black/60 text-slate-400 text-xs px-2 py-1 rounded-md backdrop-blur-sm"
+            @click.stop="onNextFrame"
+            class="absolute right-2 top-1/2 -translate-y-1/2 z-10 w-10 h-10 bg-black/50 hover:bg-black/70 text-white rounded-full flex items-center justify-center transition hover:scale-110 backdrop-blur-sm"
+            title="下一帧 (→)"
           >
-            右键切换下一帧 →
-          </div>
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+          </button>
         </div>
 
-        <!-- 小图条 -->
-        <div class="flex gap-1 mt-3 overflow-x-auto py-1 px-1" ref="stripRef">
+        <!-- 小图条（隐藏滚动条） -->
+        <div class="thumbnail-strip mt-3" ref="stripRef">
           <div
             v-for="(url, i) in frames"
             :key="i"
@@ -113,7 +127,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch, nextTick } from 'vue'
+import { computed, ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useFramePreview } from '../composables/useFramePreview'
 
 const props = defineProps<{
@@ -124,7 +138,7 @@ defineEmits<{
 }>()
 
 const videoIdRef = computed(() => props.video?.video_id ?? null)
-const { frames, currentFrame, status, nextFrame, selectFrame } = useFramePreview(videoIdRef)
+const { frames, currentFrame, status, nextFrame, prevFrame, selectFrame } = useFramePreview(videoIdRef)
 const stripRef = ref<HTMLElement | null>(null)
 
 const framesReady = computed(() => status.value === 'ready' || status.value === 'generating')
@@ -145,14 +159,16 @@ const displayName = computed(() => {
   return props.video.file_name || ''
 })
 
-function onRightClick() {
+function onNextFrame() {
   nextFrame()
-  // scrollStripToCurrent 由 watch(currentFrame) 自动触发
+}
+
+function onPrevFrame() {
+  prevFrame()
 }
 
 function onSelectFrame(i: number) {
   selectFrame(i)
-  // scrollStripToCurrent 由 watch(currentFrame) 自动触发
 }
 
 function scrollStripToCurrent() {
@@ -190,7 +206,42 @@ function formatSize(mb: number): string {
   return `${(mb / 1024).toFixed(1)}G`
 }
 
+// 键盘左右箭头切换帧
+function onKeydown(e: KeyboardEvent) {
+  if (!framesReady.value) return
+  if (e.key === 'ArrowLeft') {
+    e.preventDefault()
+    prevFrame()
+  } else if (e.key === 'ArrowRight') {
+    e.preventDefault()
+    nextFrame()
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('keydown', onKeydown)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', onKeydown)
+})
+
 watch(currentFrame, () => {
   scrollStripToCurrent()
 })
 </script>
+
+<style scoped>
+/* 隐藏小图条滚动条但保留滚动功能 */
+.thumbnail-strip {
+  display: flex;
+  gap: 0.25rem;
+  overflow-x: auto;
+  padding: 0.25rem 0.25rem;
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE/Edge */
+}
+.thumbnail-strip::-webkit-scrollbar {
+  display: none; /* Chrome/Safari/Opera */
+}
+</style>

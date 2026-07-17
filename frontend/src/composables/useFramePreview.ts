@@ -31,6 +31,18 @@ export function useFramePreview(videoId: Ref<string | null>) {
     }
   }
 
+  function prevFrame() {
+    // 循环切换到上一个已就绪的帧
+    const total = frames.value.length
+    for (let i = 1; i <= total; i++) {
+      const prev = (currentFrame.value - i + total) % total
+      if (frames.value[prev] !== null) {
+        currentFrame.value = prev
+        return
+      }
+    }
+  }
+
   function selectFrame(index: number) {
     if (index >= 0 && index < frames.value.length && frames.value[index] !== null) {
       currentFrame.value = index
@@ -119,6 +131,7 @@ export function useFramePreview(videoId: Ref<string | null>) {
     status,
     readyCount,
     nextFrame,
+    prevFrame,
     selectFrame,
     startGeneration,
     stopPolling,

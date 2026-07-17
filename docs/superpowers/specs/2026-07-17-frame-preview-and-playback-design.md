@@ -166,14 +166,15 @@ VIDEO_MIME = {
 │ ✕ 关闭按钮                       │
 │ 视频标题 + 元信息（HEVC/4K/时长） │
 ├──────────────────────────────────┤
-│ ┌──────────────────────────────┐ │
-│ │                              │ │
-│ │     大图（当前帧）             │ │
-│ │                   右键切换→   │ │
-│ │   7/20                       │ │
-│ └──────────────────────────────┘ │
+│  ◀  ┌────────────────────────┐  ▶ │
+│     │                        │    │
+│     │    大图（当前帧）        │    │
+│     │                        │    │
+│     │    7/20                │    │
+│  ◀  └────────────────────────┘  ▶ │
+│     ← 左右箭头按钮，也支持键盘 ← →  │
 ├──────────────────────────────────┤
-│ [1][2][3][4][5][6][▓7▓][8]...   │ ← 小图条（横向滚动）
+│ [1][2][3][4][5][6][▓7▓][8]...   │ ← 小图条（横向滚动，无可见滚动条）
 ├──────────────────────────────────┤
 │        ▶浏览器    ▶IINA          │ ← 纯图标按钮
 └──────────────────────────────────┘
@@ -184,10 +185,11 @@ VIDEO_MIME = {
 **`LightboxModal.vue`**（大幅改造）：
 
 - 顶部：视频标题 + 元信息标签（复用 VideoCard 的格式化函数）
-- 大图区：`<img>` 显示当前帧，`@contextmenu.prevent` 拦截右键切换
+- 大图区：`<img>` 显示当前帧，`@contextmenu.prevent` 拦截右键切换下一帧
+- **左右箭头按钮**：大图两侧各一个圆形按钮（◀ ▶），点击切换帧
+- **键盘支持**：`←` 上一帧，`→` 下一帧（通过 `window.addEventListener('keydown')`）
 - 帧计数器：左上角 `7 / 20`
-- 右键提示：右下角半透明提示文字
-- 小图条：20 个 `<img>` 横向排列，`overflow-x: auto`
+- 小图条：20 个 `<img>` 横向排列，`overflow-x: auto`，**无可见滚动条**（CSS `scrollbar-width: none`）
 - 播放按钮区：两个纯图标按钮（SVG），悬浮 tooltip 提示
 
 **新增 `useFramePreview.ts`** composable：
@@ -198,7 +200,8 @@ function useFramePreview(videoId: Ref<string>) {
   const currentFrame = ref(0)
   const status = ref<'not_started' | 'generating' | 'ready'>('not_started')
 
-  function nextFrame()        // 右键：循环切换 (currentFrame + 1) % 20
+  function nextFrame()        // 循环切换到下一个已就绪帧
+  function prevFrame()        // 循环切换到上一个已就绪帧
   function selectFrame(i: number)  // 左键小图：跳转到第 i 帧
   function startGeneration() // POST /api/frames/{id}/generate + 轮询
 
@@ -212,6 +215,8 @@ function useFramePreview(videoId: Ref<string>) {
 |------|------|
 | 点击视频卡片 | 打开 Lightbox，显示封面，自动触发帧抽取 |
 | 右键大图 | 大图切换到下一帧（循环 1→2→...→20→1），小图条高亮跟随 |
+| 左箭头按钮 / `←` 键 | 大图切换到上一帧（循环 20→19→...→1→20） |
+| 右箭头按钮 / `→` 键 | 大图切换到下一帧（循环 1→2→...→20→1） |
 | 左键点小图 | 大图跳转到该帧，高亮框移动 |
 | 未就绪帧小图 | 灰色 loading 占位，就绪后替换为 JPEG |
 | 点击 ▶浏览器 | `window.open('/api/video/{id}')` 新标签页 |
@@ -222,6 +227,7 @@ function useFramePreview(videoId: Ref<string>) {
 - 帧就绪后懒加载显示 JPEG（`<img loading="lazy">`）
 - 当前帧高亮：紫色边框（`border-indigo-500`）+ 阴影（`shadow-lg shadow-indigo-500/40`）
 - 溢出时横向滚动，当前帧自动 `scrollIntoView({ behavior: 'smooth', inline: 'center' })`
+- **无可见滚动条**：CSS `scrollbar-width: none` + `::-webkit-scrollbar { display: none }`
 - 小图尺寸：宽 80px，16:9 比例
 
 ### 4.5 播放按钮
@@ -252,9 +258,15 @@ function useFramePreview(videoId: Ref<string>) {
               │
               └─→ status = "ready" → 停止轮询，全部 20 帧就绪
 
-用户右键大图
+用户右键大图 / 点击 ▶ 按钮 / 按 → 键
     │
-    └─→ currentFrame = (currentFrame + 1) % 20
+    └─→ nextFrame(): currentFrame = (currentFrame + 1) % 20
+         ├─→ 大图 <img> src 更新
+         └─→ 小图条高亮框移动 + scrollIntoView
+
+用户点击 ◀ 按钮 / 按 ← 键
+    │
+    └─→ prevFrame(): currentFrame = (currentFrame - 1 + 20) % 20
          ├─→ 大图 <img> src 更新
          └─→ 小图条高亮框移动 + scrollIntoView
 

@@ -1,0 +1,15 @@
+# docker-compose.local.yaml
+# 本地测试用：用本地目录替代 CIFS 挂载
+services:
+  video-explorer:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    ports:
+      - "8002:8000"
+    volumes:
+      - ./data:/app/data
+      - ./test-videos:/videos:ro
+    environment:
+      - DATA_PATH=/app/data
+      - IP_WHITE_LIST=172.19.0.1

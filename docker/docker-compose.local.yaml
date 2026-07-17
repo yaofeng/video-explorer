@@ -12,4 +12,7 @@ services:
       - ./test-videos:/videos:ro
     environment:
       - DATA_PATH=/app/data
-      - IP_WHITE_LIST=172.19.0.1
+      - IP_WHITE_LIST=${IP_WHITE_LIST:-}
+      # Docker 端口映射时，客户端 IP 会被 docker 网关 IP 替换。
+      # 设为 "*" 信任所有代理（仅限内部网络环境使用）。
+      - FORWARDED_ALLOW_IPS=*

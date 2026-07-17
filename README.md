@@ -1,24 +1,25 @@
 # video-explorer
 
-一个视频库浏览器：FastAPI 后端扫描视频目录、按目录缓存元数据（`index.yaml`）与原始帧 JPEG 缩略图；Vue 3 + Tailwind 前端按 `根 → L1（顶级菜单）→ L2（左侧菜单）→ 叶子分组卡片` 三层层级浏览，采用三阶段渐进加载（L1 文件名 → L2 ffprobe 元数据 → L3 缩略图）。本项目仅做浏览，不含播放/预览。
+一个视频库浏览器：FastAPI 后端扫描视频目录、按目录缓存元数据（`index.yaml`）与原始帧 JPEG 缩略图；Vue 3 + Tailwind 前端按 `根 → L1（顶级菜单）→ L2（左侧菜单）→ 叶子分组卡片` 三层层级浏览，采用三阶段渐进加载（L1 文件名 → L2 ffprobe 元数据 → L3 缩略图）。支持视频帧预览（20 帧抽帧 + 右键/键盘/箭头切换）和视频播放（浏览器 + IINA）。
 
 ## 目录结构
 
 ```
 backend/    FastAPI 后端
   app/
-    main.py              入口；路由装配；静态文件 SPA 兜底
+    main.py              入口；路由装配；静态文件 SPA 兜底；ProxyHeadersMiddleware
     config.py            配置（config.yaml）读写，原子落盘
-    security.py          IP 白名单中间件
+    security.py          IP 白名单中间件 + get_client_ip 辅助函数
     paths.py             id→路径 解析（带 TTL 缓存）
     safe_regex.py        用户正则带超时安全匹配
     models.py            Pydantic 模型（扁平 VideoItem）
     services/
-      scanner.py         三阶段扫描编排（L1/L2/L3）+ 任务进度
+      scanner.py         三阶段扫描编排（L1/L2/L3）+ 任务进度 + 帧抽取集成
       probe.py           ffprobe 封装
       thumbgen.py        原始帧 JPEG 抽取 + 小图压缩
+      framegen.py        20 帧批量抽取 + 状态管理
       cache_index.py     index.yaml 读写（原子写、批量 upsert）
-    routes/              config / dirs / videos / scan / parse_rules
+    routes/              config / dirs / videos / scan / parse_rules / frames / video
 frontend/   Vue 3 + Vite + Tailwind 前端
 docker/     Dockerfile + docker-compose（CIFS 挂载 NAS）
 bin/        运维脚本（build / start / start-dev / stop / restart）
@@ -32,6 +33,29 @@ bin/        运维脚本（build / start / start-dev / stop / restart）
 |---|---|---|
 | `DATA_PATH` | 数据目录（config.yaml / cache / logs） | 当前工作目录 |
 | `IP_WHITE_LIST` | 允许访问 API 的客户端 IP（空格/逗号分隔；localhost 始终放行） | 空（仅本地） |
+| `FORWARDED_ALLOW_IPS` | 信任的反向代理 IP（逗号分隔），用于从 `X-Forwarded-For` 解析真实客户端 IP。设为 `*` 信任所有代理（仅限内部可信网络如 Tailscale/Docker） | `127.0.0.1` |
+
+### 反向代理场景
+
+经过 Nginx / Caddy / Tailscale Funnel / Docker 端口映射时，`request.client.host` 默认拿到的是代理的 IP，不是真实客户端 IP。项目通过 Starlette 的 `ProxyHeadersMiddleware` 从 `X-Forwarded-For` / `X-Real-IP` 头解析真实 IP。
+
+需设置 `FORWARDED_ALLOW_IPS` 告诉后端信任哪些代理：
+
+```bash
+# Docker 端口映射（所有流量都来自 Docker 网关）
+FORWARDED_ALLOW_IPS=*
+
+# Nginx 反向代理（已知代理 IP）
+FORWARDED_ALLOW_IPS=192.168.1.100
+
+# Tailscale Funnel / 内部网络
+FORWARDED_ALLOW_IPS=*
+
+# 直连访问（无代理）
+# 无需设置，默认 127.0.0.1 即可
+```
+
+> ⚠️ `FORWARDED_ALLOW_IPS=*` 在生产环境公网部署时有安全风险（攻击者可伪造 X-Forwarded-For 绕过 IP 白名单）。仅在内部可信网络中使用。
 
 视频库根目录列表、每页大小、列数、文件名解析规则在前端「设置」中编辑，持久化到 `DATA_PATH/config.yaml`。
 

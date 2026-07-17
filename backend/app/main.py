@@ -1,8 +1,10 @@
+import os
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pathlib import Path
 from contextlib import asynccontextmanager
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from . import config
 from .security import IPWhitelistMiddleware
 from .routes import config as config_routes, dirs, videos, scan, parse_rules, frames, video
@@ -19,7 +21,23 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-# 中间件
+# 中间件（注意：Starlette 中间件执行顺序与注册顺序相反，
+# 最后 add 的最先执行。ProxyHeadersMiddleware 必须在 IPWhitelistMiddleware
+# 之前执行，使 request.client.host 已经是解析后的真实客户端 IP）
+
+# 反向代理真实 IP 解析：从 X-Forwarded-For / X-Real-IP 头中提取客户端 IP。
+# FORWARDED_ALLOW_IPS 配置信任的代理 IP（逗号分隔），"*" 表示信任所有代理。
+# 默认 "127.0.0.1" 仅信任本机代理。经过 nginx / Tailscale / Docker 端口映射
+# 时需设置为对应代理 IP 或 "*"。
+_forwarded_allow_ips = os.getenv("FORWARDED_ALLOW_IPS", "127.0.0.1").strip()
+_trusted_hosts = (
+    ["*"] if _forwarded_allow_ips == "*"
+    else [h.strip() for h in _forwarded_allow_ips.replace(",", " ").split() if h.strip()]
+    or ["127.0.0.1"]
+)
+app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=_trusted_hosts)
+
+# IP 白名单：此时 request.client.host 已是真实客户端 IP
 app.add_middleware(IPWhitelistMiddleware)
 
 # 日志

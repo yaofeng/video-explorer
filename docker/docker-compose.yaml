@@ -12,6 +12,9 @@ services:
     environment:
       - DATA_PATH=/app/data
       - IP_WHITE_LIST=${IP_WHITE_LIST:-}
+      # 反向代理真实 IP 解析。Nginx/Caddy/Tailscale Funnel 等代理场景需设为
+      # 代理 IP 或 "*"（仅限内部可信网络）。直连访问时无需设置。
+      - FORWARDED_ALLOW_IPS=${FORWARDED_ALLOW_IPS:-127.0.0.1}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
       interval: 30s

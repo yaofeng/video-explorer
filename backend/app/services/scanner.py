@@ -166,6 +166,8 @@ class Scanner:
         self._tasks = {}  # task_id -> _Task
         self._tasks_lock = threading.Lock()
         self._frame_executor = ThreadPoolExecutor(max_workers=2)
+        self._frame_generating: set[str] = set()  # 正在生成帧的 video_id（防 TOCTOU 竞态）
+        self._frame_generating_lock = threading.Lock()
 
     def _get_l2_state(self, l2_path: str) -> _L2State:
         with self._lock:
@@ -654,12 +656,19 @@ class Scanner:
         if status is not None:
             if not status.get("generating", False):
                 return False  # 已完成
-            return False  # 正在生成中
+
+        # 原子地标记为生成中（防 TOCTOU 竞态：两个并发 POST 不会同时提交任务）
+        with self._frame_generating_lock:
+            if video_id in self._frame_generating:
+                return False  # 已有任务在生成
+            self._frame_generating.add(video_id)
 
         # 提交到线程池
         cfg = config.load_config()
         root = find_root(video_path, cfg.video_path_list)
         if root is None:
+            with self._frame_generating_lock:
+                self._frame_generating.discard(video_id)
             return False
         index_path, _ = cache_index.video_cache_path(str(root), video_path)
         # 从 index.yaml 读取 duration
@@ -675,10 +684,14 @@ class Scanner:
                 height = int(v.get("height") or 0)
                 break
 
-        self._frame_executor.submit(
-            framegen.extract_all_frames,
-            video_path, frames_dir, duration, width, height,
-        )
+        def _run_and_cleanup():
+            try:
+                framegen.extract_all_frames(video_path, frames_dir, duration, width, height)
+            finally:
+                with self._frame_generating_lock:
+                    self._frame_generating.discard(video_id)
+
+        self._frame_executor.submit(_run_and_cleanup)
         return True
 
     def get_frame_jpeg(self, video_id: str, frame_index: int) -> bytes | None:

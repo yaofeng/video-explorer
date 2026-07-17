@@ -16,6 +16,8 @@ export function useFramePreview(videoId: Ref<string | null>) {
   const readyCount = ref(0)
 
   let pollTimer: ReturnType<typeof setInterval> | null = null
+  // 版本号：每次 videoId 变化时递增，用于丢弃过期轮询响应
+  let requestVersion = 0
 
   function nextFrame() {
     // 循环切换到下一个已就绪的帧
@@ -35,10 +37,13 @@ export function useFramePreview(videoId: Ref<string | null>) {
     }
   }
 
-  async function pollStatus(): Promise<'not_started' | 'generating' | 'ready'> {
+  async function pollStatus(expectedVersion: number): Promise<'not_started' | 'generating' | 'ready'> {
     if (!videoId.value) return 'not_started'
+    const currentVideoId = videoId.value
     try {
-      const { data } = await axios.get<FrameStatus>(`/api/frames/${videoId.value}`)
+      const { data } = await axios.get<FrameStatus>(`/api/frames/${currentVideoId}`)
+      // 如果 videoId 在请求期间变化了，丢弃此响应
+      if (expectedVersion !== requestVersion) return status.value
       status.value = data.status
       readyCount.value = data.ready_count
       frames.value = data.frame_urls
@@ -55,6 +60,10 @@ export function useFramePreview(videoId: Ref<string | null>) {
 
   async function startGeneration() {
     if (!videoId.value) return
+    // 递增版本号，使之前未完成的轮询响应失效
+    requestVersion++
+    const myVersion = requestVersion
+
     // 重置状态
     frames.value = Array(20).fill(null)
     currentFrame.value = 0
@@ -68,17 +77,23 @@ export function useFramePreview(videoId: Ref<string | null>) {
     }
 
     // 先立即查一次状态
-    const currentStatus = await pollStatus()
+    const currentStatus = await pollStatus(myVersion)
 
-    // 如果还没完成，启动轮询
-    if (currentStatus !== 'ready') {
-      startPolling()
+    // 如果还没完成且 videoId 没变，启动轮询
+    if (currentStatus !== 'ready' && myVersion === requestVersion) {
+      startPolling(myVersion)
     }
   }
 
-  function startPolling() {
+  function startPolling(expectedVersion: number) {
     stopPolling()
-    pollTimer = setInterval(pollStatus, 2000)
+    pollTimer = setInterval(() => {
+      if (expectedVersion !== requestVersion) {
+        stopPolling()
+        return
+      }
+      pollStatus(expectedVersion)
+    }, 2000)
   }
 
   function stopPolling() {

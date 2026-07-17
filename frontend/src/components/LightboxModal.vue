@@ -147,12 +147,12 @@ const displayName = computed(() => {
 
 function onRightClick() {
   nextFrame()
-  scrollStripToCurrent()
+  // scrollStripToCurrent 由 watch(currentFrame) 自动触发
 }
 
 function onSelectFrame(i: number) {
   selectFrame(i)
-  scrollStripToCurrent()
+  // scrollStripToCurrent 由 watch(currentFrame) 自动触发
 }
 
 function scrollStripToCurrent() {
@@ -177,7 +177,7 @@ function openInIINA() {
 }
 
 function formatDuration(sec?: number): string {
-  if (!sec) return ''
+  if (sec == null || sec < 0) return ''
   const h = Math.floor(sec / 3600)
   const m = Math.floor((sec % 3600) / 60)
   const s = Math.floor(sec % 60)
@@ -185,7 +185,7 @@ function formatDuration(sec?: number): string {
 }
 
 function formatSize(mb: number): string {
-  if (!mb || mb <= 0) return ''
+  if (mb == null || mb < 0) return ''
   if (mb < 1024) return `${mb}M`
   return `${(mb / 1024).toFixed(1)}G`
 }

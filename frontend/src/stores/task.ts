@@ -74,10 +74,27 @@ export const useTaskStore = defineStore('task', {
       tick()
     },
     async buildIndex(rootId: string) {
-      // 立即先轮询一次（抢占式），再发请求，确保不漏掉快速任务
+      // 立即开始轮询
       this.startPolling()
-      await axios.post(`/api/roots/${rootId}/build`)
-      await this.poll()  // 请求返回后立刻再拉一次
+      // 触发构建并获取任务信息
+      const { data } = await axios.post(`/api/roots/${rootId}/build`)
+      // 立即将任务加入到 running 列表，避免快速完成的任务被遗漏
+      if (data && data.running) {
+        const task: Task = {
+          id: `build:${rootId}`,
+          kind: 'build',
+          label: data.label || '构建索引',
+          total: data.total || 0,
+          done: data.done || 0,
+        }
+        // 避免重复添加
+        if (!this.running.find(t => t.id === task.id)) {
+          this.running.push(task)
+        }
+      }
+      // 立即轮询一次以获取最新状态
+      await this.poll()
+      // 确保轮询继续
       this.startPolling()
     },
     notifyScan() {

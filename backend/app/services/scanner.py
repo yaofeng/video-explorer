@@ -894,12 +894,13 @@ class Scanner:
         if existing:
             with existing.lock:
                 if existing.running:
-                    return {"running": True, "total": existing.total, "done": existing.done}
+                    return {"running": True, "total": existing.total, "done": existing.done, "label": existing.label}
 
-        self._register_task(task_id, "build", f"构建索引: {Path(root_path).name}")
+        label = f"构建索引: {Path(root_path).name}"
+        self._register_task(task_id, "build", label)
         t = threading.Thread(target=self._build_worker, args=(root_path, task_id), daemon=True)
         t.start()
-        return {"running": True, "total": 0, "done": 0}
+        return {"running": True, "total": 0, "done": 0, "label": label}
 
     def _build_worker(self, root_path: str, task_id: str):
         try:

@@ -1,5 +1,5 @@
 <template>
-  <div v-if="visibleItems.length" class="fixed top-4 right-4 z-50 space-y-2 w-72">
+  <div v-if="visibleItems" class="fixed top-4 right-4 z-50 space-y-2 w-72">
     <!-- 扫描错误（聚合计数） -->
     <div
       v-if="browser.errors.length"

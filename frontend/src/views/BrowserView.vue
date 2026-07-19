@@ -13,8 +13,6 @@
       <SideMenu
         :dirs="browser.l2Dirs"
         :selected="browser.selectedL2Id"
-        :scanning="browser.scanning"
-        :progress="browser.progress"
         @select="onSelectL2"
       />
       <VideoGrid :groups="browser.groups" :columnSize="config.column_size" @showLightbox="showLightbox" />

@@ -50,8 +50,25 @@ def test_scanner_ensures_scan(video_dir, monkeypatch):
     scanner = Scanner()
     l2_path = str(Path(video_dir) / "movies" / "action")
     groups, scanning, progress = scanner.ensure_scan(l2_path)
+
+    # 新设计：首次扫描时 Phase 1 在后台运行，需要等待完成
+    # 轮询等待扫描完成（最多 5 秒）
+    import time
+    timeout = time.time() + 5.0
+    while time.time() < timeout:
+        state = scanner._get_l2_state(l2_path)
+        with state.lock:
+            if not state.scanning and len(state.videos) > 0:
+                break
+        time.sleep(0.1)
+
+    # 重新获取结果
+    groups = scanner._build_groups(scanner._get_l2_state(l2_path))
+    progress = scanner._build_progress(scanner._get_l2_state(l2_path))
+    state = scanner._get_l2_state(l2_path)
+
     assert len(groups) > 0
-    assert scanning == False  # 小目录扫描快速完成
+    assert state.scanning == False  # 扫描完成
     assert progress["total"] >= 1
 
 

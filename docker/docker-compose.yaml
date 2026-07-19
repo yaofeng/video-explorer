@@ -1,9 +1,11 @@
 services:
   video-explorer:
-    image: yaofeng928/video-explorer:latest
+    image: yaofeng928/video-explorer:${IMAGE_TAG:-latest}
     build:
       context: ..
       dockerfile: docker/Dockerfile
+      tags:
+        - yaofeng928/video-explorer:latest
     ports:
       - "8002:8000"
     volumes:

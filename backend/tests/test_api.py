@@ -94,6 +94,17 @@ def test_get_videos_triggers_scan(video_library):
     assert "groups" in data
     assert "scanning" in data
     assert "progress" in data
+
+    # 新设计：首次扫描时 Phase 1 在后台运行，需要轮询等待完成
+    import time
+    timeout = time.time() + 5.0
+    while time.time() < timeout:
+        resp = client.get(f"/api/l2/{l2_id}/videos")
+        data = resp.json()
+        if len(data["groups"]) >= 1 and not data["scanning"]:
+            break
+        time.sleep(0.1)
+
     # 至少有一个分组、包含我们的测试视频
     assert len(data["groups"]) >= 1
     all_names = [v["file_name"] for g in data["groups"] for v in g["videos"]]

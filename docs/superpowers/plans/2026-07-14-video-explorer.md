@@ -2675,3 +2675,55 @@ git commit -m "chore: final integration fixes"
 ## 完成
 
 计划已完成。所有后端模块都有 TDD，所有前端组件都有真实代码，脚本和 Docker 都已配置。应用端到端完全可用。
+
+---
+
+## 变更历史（2026-07-19 起）
+
+以下是实施过程中相对原始计划的关键变更：
+
+### 1. Docker 镜像 Tag 支持灵活化
+- `docker/docker-compose.yaml` 改用 `image: yaofeng928/video-explorer:${IMAGE_TAG:-latest}` + `build.tags` 列表
+- 本地默认 `latest`，CI 可用 `IMAGE_TAG=$(git rev-parse --short HEAD)` 打 git hash tag
+
+### 2. 进度指示简化
+- **移除**：左侧菜单底部进度条（`SideMenu.vue` 不再显示 progress）
+- **保留**：右上角 `TaskToast.vue`，但仅用于：
+  - 扫描错误聚合展示（⚠️ 图标 + "N 个文件处理失败" + 详情）
+  - `build` 任务（多目录构建索引）的进度条
+- **单目录 scan 任务不再注册进度**，仅通过页面内容增量更新反馈
+
+### 3. 扫描架构重构为两阶段
+- **Phase 1（快速文件系统扫描）**：遍历目录、处理新增/删除、应用 `parse_rules` 更新 `ext`。无进度条，完成后发 `refresh_full` 信号供前端全量刷新。
+- **Phase 2（深度扫描）**：对 `level<3` 或 `modify_time` 变化的文件执行 ffprobe + 缩略图提取。每完成一个文件原子更新 `index.yaml`（per-path 文件锁）。
+- 打开 L2 目录时若 `index.yaml` 已存在，**立即从缓存渲染**（秒开），后台并行扫描。
+
+### 4. 文件名解析改进
+- `_parse_filename` **先剥离文件扩展名**再匹配规则（如 `ABC-123.mp4` 用 `ABC-123` 匹配）
+- **无匹配规则时删除 `index.yaml` 中已有的 `ext` 字段**，保持数据一致性
+- `parse_rules` 变更通过 `PUT /api/config` 保存时，自动调用 `scanner.invalidate_all_caches()`，下次打开目录时重新解析
+
+### 5. `scan-status` API 扩展
+- 新增字段：
+  - `phase`: 当前扫描阶段（"idle" / "quick" / "deep" / "done"）
+  - `refresh_full`: 一次性信号（Phase 1 完成时置 true，前端据此全量刷新）
+  - `errors`: 聚合错误列表（`[{file, message}]`）
+
+### 6. 并发控制
+- 新增 `_get_index_lock(path)` + `_atomic_update_index` / `_atomic_remove_from_index`，对 `index.yaml` 的读-改-写使用 per-path 文件锁，避免多线程并发写入导致数据丢失
+
+### 7. 后端模块布局
+- 实际布局：`backend/app/` 顶层扁平结构（`scanner.py`, `cache_index.py`, `probe.py`, `thumbgen.py` 等）
+- 路由子包：`backend/app/routes/`（`config.py`, `dirs.py`, `videos.py`, `scan.py`, `parse_rules.py`）
+- 原始计划中的 `services/` 子目录和 `descfile.py` 未实现
+
+### 8. 设置 UI 形态
+- 实际实现：`SettingsModal.vue`（浮窗 Modal）+ `RuleTestModal.vue`（规则测试浮窗）
+- 原始计划中的 `/settings` 独立路由 + `SettingsView.vue` 未实现
+
+### 9. 前端新增功能
+- `useFilterStore`：搜索/排序/编码过滤状态持久化到 localStorage
+- `TopMenu.vue`：搜索框 + 排序按钮组 + 编码过滤下拉 + 主题切换 + 设置按钮
+- `VideoCard.vue`：支持 `ext` 字段展示（title 替换文件名，code/actress 作为可点击标签）
+- `RuleTestModal.vue`：正则规则测试器
+- `TaskToast.vue`：扫描错误聚合展示 + build 任务进度条

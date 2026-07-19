@@ -15,22 +15,6 @@
         {{ dir.name }}
       </button>
     </div>
-    <!-- 进度条 -->
-    <div
-      v-if="scanning && progress.total > 0"
-      class="m-3 p-3 rounded-lg bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700"
-    >
-      <div class="flex justify-between items-center mb-2">
-        <span class="text-xs font-medium text-slate-600 dark:text-slate-300">处理中</span>
-        <span class="text-xs text-slate-500 dark:text-slate-400 tabular-nums">{{ progress.level2 }}/{{ progress.total }}</span>
-      </div>
-      <div class="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-1.5 overflow-hidden">
-        <div
-          class="bg-indigo-500 h-full rounded-full transition-all duration-300"
-          :style="{ width: `${Math.round((progress.level2 / progress.total) * 100)}%` }"
-        ></div>
-      </div>
-    </div>
   </div>
 </template>
 
@@ -38,8 +22,6 @@
 defineProps<{
   dirs: { id: string; name: string }[]
   selected: string | null
-  scanning: boolean
-  progress: { total: number; level1: number; level2: number; level3: number }
 }>()
 defineEmits<{
   (e: 'select', id: string): void

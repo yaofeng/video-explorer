@@ -57,6 +57,12 @@ class ScanStatus(BaseModel):
     ready: int
     last_seq: int
     progress: dict = Field(default_factory=dict)
+    # 扫描阶段："idle" | "quick" | "deep" | "done"
+    phase: str = "idle"
+    # Phase 1 完成后一次性置 True，前端据此全量刷新（处理删除等）
+    refresh_full: bool = False
+    # 聚合错误信息（供右上角 TaskToast 显示）
+    errors: list[dict] = Field(default_factory=list)
     updates: list[ScanUpdate]
 
 

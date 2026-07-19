@@ -3,9 +3,6 @@ import axios from 'axios'
 
 /**
  * 扁平视频条目（与后端 index.yaml / API 结构一致）。
- * L1：仅有 video_id/file_name/file_size/group/level=1
- * L2：附加 codec/width/height/duration/resolution_label
- * L3：附加缩略图（后端可用）
  */
 interface VideoItem {
   video_id: string
@@ -13,14 +10,13 @@ interface VideoItem {
   file_size: number  // 单位：MB（整数）
   group: string
   level: number  // 1=filename, 2=+metadata, 3=+thumbnail
-  modify_time?: number  // 源文件修改时间（epoch 秒）
-  ext?: Record<string, string>  // 文件名解析扩展信息（code/actress/title 等）
-  // L2+ 元数据字段
+  modify_time?: number
+  ext?: Record<string, string>
   codec?: string
   width?: number
   height?: number
   duration?: number
-  resolution_label?: string  // e.g. "4K", "FHD"
+  resolution_label?: string
 }
 
 interface Group {
@@ -28,11 +24,9 @@ interface Group {
   videos: VideoItem[]
 }
 
-interface ProgressInfo {
-  total: number
-  level1: number
-  level2: number
-  level3: number
+export interface ScanError {
+  file: string
+  message: string
 }
 
 export const useBrowserStore = defineStore('browser', {
@@ -45,8 +39,11 @@ export const useBrowserStore = defineStore('browser', {
     selectedL2Id: null as string | null,
     groups: [] as Group[],
     scanning: false,
-    progress: { total: 0, level1: 0, level2: 0, level3: 0 } as ProgressInfo,
-    // 上次轮询收到的最大 seq，用于增量拉取（M1）
+    // 扫描阶段："idle" | "quick" | "deep" | "done"
+    phase: 'idle' as string,
+    // 聚合错误信息
+    errors: [] as ScanError[],
+    // 上次轮询收到的最大 seq
     lastSeq: 0,
   }),
   actions: {
@@ -71,13 +68,13 @@ export const useBrowserStore = defineStore('browser', {
     },
     async selectL2(l2Id: string) {
       this.selectedL2Id = l2Id
-      // 切换目录时重置增量游标（M1）
       this.lastSeq = 0
+      this.errors = []
+      this.phase = 'idle'
       const { data } = await axios.get(`/api/l2/${l2Id}/videos`)
       this.groups = data.groups
       this.scanning = data.scanning
-      this.progress = data.progress || { total: 0, level1: 0, level2: 0, level3: 0 }
-      // 打开目录触发扫描 → 启动任务浮窗轮询
+      // 打开目录触发扫描 → 启动任务浮窗轮询（build 任务仍显示进度）
       if (this.scanning) {
         const { useTaskStore } = await import('./task')
         useTaskStore().notifyScan()
@@ -85,26 +82,28 @@ export const useBrowserStore = defineStore('browser', {
     },
     async pollStatus() {
       if (!this.selectedL2Id) return
-      // 增量拉取：只取 seq > lastSeq 的更新（M1，避免全量重复传输）
       const { data } = await axios.get(
         `/api/scan-status?l2_id=${this.selectedL2Id}&since=${this.lastSeq}`,
       )
       this.scanning = data.scanning
-      this.progress = data.progress || { total: 0, level1: 0, level2: 0, level3: 0 }
-      // 合并增量更新到分组（扁平字段直接合并）；新增视频插入到对应 group
+      this.phase = data.phase || 'idle'
+
+      // Phase 1 完成：后端发 refresh_full 信号 → 全量刷新（处理删除/新增）
+      if (data.refresh_full) {
+        await this._refreshGroups()
+      }
+
+      // 合并增量更新（L2/L3 升级）
       for (const update of data.updates) {
         let placed = false
         for (const group of this.groups) {
           if (group.name === update.group) {
             const existing = group.videos.find(v => v.video_id === update.video_id)
             if (existing) {
-              // 合并所有扁平字段
               Object.assign(existing, update)
-              // 清理 scan 协议字段（不属于 VideoItem）
               delete (existing as any).seq
               placed = true
             } else {
-              // 扫描中新发现的视频，插入到该分组（M1）
               const { seq, ...item } = update
               group.videos.push(item as VideoItem)
               placed = true
@@ -113,7 +112,6 @@ export const useBrowserStore = defineStore('browser', {
           }
         }
         if (!placed) {
-          // 分组尚不存在 → 新建
           const { seq, ...item } = update
           this.groups.push({ name: update.group, videos: [item as VideoItem] })
         }
@@ -121,10 +119,29 @@ export const useBrowserStore = defineStore('browser', {
           this.lastSeq = update.seq
         }
       }
-      // 同步后端的 last_seq（无更新时也能前进游标）
+
       if (typeof data.last_seq === 'number' && data.last_seq > this.lastSeq) {
         this.lastSeq = data.last_seq
       }
+
+      // 错误聚合
+      if (Array.isArray(data.errors) && data.errors.length > 0) {
+        this.errors = data.errors
+      }
+    },
+    async _refreshGroups() {
+      // Phase 1 完成后全量重新拉取（处理删除/新增/分组变化）
+      if (!this.selectedL2Id) return
+      try {
+        const { data } = await axios.get(`/api/l2/${this.selectedL2Id}/videos`)
+        this.groups = data.groups
+        this.lastSeq = 0  // 重置增量游标
+      } catch {
+        // 全量拉取失败时保留现有数据
+      }
+    },
+    clearErrors() {
+      this.errors = []
     },
   },
 })
